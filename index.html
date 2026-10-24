@@ -160,11 +160,21 @@ tr.sub.crow td{background:color-mix(in srgb, var(--cc) 9%, transparent)}
 .ccard .value{font-size:1.35rem;font-weight:700;margin:4px 0}
 .ccard input[type=color]{width:38px;height:30px;border:1px solid var(--line);border-radius:6px;padding:1px;background:var(--surface)}
 .vt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 14px}.vt-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.88rem;border-bottom:1px dashed var(--line);padding:3px 0}.vt-row select{font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}
+tr.foot-heads th{font-weight:600;color:var(--muted);font-size:.72rem;background:var(--sunk);border-top:1px solid var(--line);border-bottom:none;position:static}
+.tablebox.tall{max-height:74vh;overflow:auto}
+.tablebox.tall thead th{position:sticky;top:0;z-index:2}
+.tablebox.tall tr.foot-heads th{position:sticky;bottom:0;z-index:2}
+.tablebox.tall tr.total.stick td{position:sticky;bottom:var(--fh,0px);z-index:2;background:var(--surface);box-shadow:0 -1px 0 var(--line)}
+.tablebox.wide th:first-child,.tablebox.wide td:first-child{position:sticky;right:0;z-index:1;background:var(--surface);box-shadow:-1px 0 0 var(--line)}
+.tablebox.wide thead th:first-child,.tablebox.wide tr.foot-heads th:first-child{background:var(--sunk);z-index:3}
+.tablebox.wide tr.sub td:first-child{background:var(--sunk)}
+.tablebox.tall.wide tr.total.stick td:first-child{z-index:3}
+tbody tr:not(.total):not(.sub):hover>td{background:var(--accent-soft)}
 
 /* managers' page. Never: deleting, restoring, settings, vans, PINs, managers, closing a day */
 html.ro [data-act=newVan],html.ro [data-act=maintOn],html.ro [data-act=maintOff],html.ro [data-sreceipt]~.pill,html.ro [data-act=toggleClose],
 html.ro [data-act=savePreset],html.ro [data-act=delPreset],html.ro [data-act=newViewer],html.ro [data-editvan],html.ro [data-del],html.ro [data-restore],
-html.ro [data-pin],html.ro [data-revoke],html.ro [data-rmphoto],html.ro details,html.ro label:has(#showDel){display:none!important}
+html.ro [data-pin],html.ro [data-revoke],html.ro [data-rmphoto],html.ro [data-delbatch],html.ro [data-resbatch],html.ro [data-redit],html.ro .rc-acts,html.ro details,html.ro label:has(#showDel){display:none!important}
 /* adding / editing: only on the pages the owner opened for editing (html.ed) */
 html.ro:not(.ed) [data-act=newInvoice],html.ro:not(.ed) [data-act=newPurchase],html.ro:not(.ed) [data-act=newCollection],html.ro:not(.ed) [data-act=newTransfer],
 html.ro:not(.ed) [data-act=newExpense],html.ro:not(.ed) [data-act=newDeposit],html.ro:not(.ed) [data-act=newCustomer],html.ro:not(.ed) [data-act=newItem],
@@ -203,6 +213,7 @@ html.ro:not(.ed) select[data-kind],html.ro:not(.ed) select[data-cheque],html.ro 
     <a href="#bank">الإيداع والبنك</a>
     <a href="#sales">المبيعات</a>
     <a href="#purchases">المشتريات</a>
+    <a href="#stock">المخزون</a>
     <a href="#expenses">المصاريف</a>
     <a href="#docs">الصور والمستندات</a>
     <a href="#reports">التقارير</a>
@@ -234,6 +245,9 @@ const fmt = (v, d=2) => { v = num(v); if (v === null || isNaN(v)) return '—'; 
 const kg = v => fmt(v,1), jd = v => fmt(v,2);
 const pct = v => { v = num(v); return v === null || !isFinite(v) ? '—' : (v*100).toFixed(1)+'%'; };
 const sum = (arr, k) => (arr||[]).reduce((a,r)=>a+(num(typeof k==='function'?k(r):r[k])||0),0);
+// weighted average Σ(w·x)/Σw over rows with a positive weight (e.g. cost per kg weighted by kg)
+const wavg = (arr, x, w) => { let a = 0, b = 0; (arr||[]).forEach(r => { const xv = num(typeof x==='function'?x(r):r[x]), wv = num(typeof w==='function'?w(r):r[w]); if (xv !== null && wv !== null && isFinite(xv) && isFinite(wv) && wv > 0) { a += xv*wv; b += wv; } }); return b ? a/b : null; };
+const ratio = (arr, a, b) => { const d = sum(arr, b); return d ? sum(arr, a)/d : null; };
 const by = (arr, f) => (arr||[]).reduce((m,r)=>{const k=f(r);(m[k]=m[k]||[]).push(r);return m;},{});
 const dayName = d => new Date(d+'T12:00:00').toLocaleDateString('ar-JO-u-nu-latn',{weekday:'long',day:'numeric',month:'numeric'});
 const vanName = v => { const x = (typeof D !== 'undefined' && D && D.vans || []).find(z=>z.van_no==v); return x ? x.name : 'السيارة '+v; };
@@ -248,7 +262,7 @@ const RECEIPTS = ['نقدي','ذمم'];
 function toast(t){ const el=$('#toast'); el.textContent=t; el.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>el.hidden=true,2600); }
 window.copyTable = function(id){
   const t=document.getElementById(id); if(!t) return;
-  const text=[...t.rows].map(r=>[...r.cells].filter(c=>!c.classList.contains('noexp')).map(c=>c.innerText.replace(/\s+/g,' ').trim()).join('\t')).join('\n');
+  const text=[...t.rows].filter(r=>!r.classList.contains('foot-heads')).map(r=>[...r.cells].filter(c=>!c.classList.contains('noexp')).map(c=>c.innerText.replace(/\s+/g,' ').trim()).join('\t')).join('\n');
   const fallback=()=>{ const r=document.createRange(); r.selectNode(t); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast('حدِّد ثم انسخ (Ctrl+C)'); };
   try{ navigator.clipboard.writeText(text).then(()=>toast('نُسخ الجدول — الصقه في الإكسل'),fallback); }catch(e){ fallback(); }
 };
@@ -393,6 +407,7 @@ const opts = (list, sel) => list.map(x=>`<option ${x===sel?'selected':''}>${esc(
 
 // ================================================================ modal forms
 function openModal(html, onSubmit){
+  const after = state.afterSave; state.afterSave = null;
   const m = $('#modal');
   m.innerHTML = `<div class="overlay" role="dialog" aria-modal="true"><form class="sheet" id="mform" novalidate>${html}
     <div class="err" id="merr" hidden></div>
@@ -408,7 +423,7 @@ function openModal(html, onSubmit){
     err.hidden = true; btn.disabled = true; btn.textContent = 'جارٍ الحفظ…';
     try {
       const msg = await onSubmit(new FormData($('#mform')), $('#mform'));
-      close(); if (msg) toast(msg); load();
+      close(); if (msg) toast(msg); load(); if (after) after();
     } catch(ex) {
       err.textContent = ex && ex.code && !/tool_error/.test(ex.code) ? connectionMessage(ex) : cleanError(ex);
       err.hidden = false; btn.disabled = false; btn.textContent = 'حفظ';
@@ -871,7 +886,7 @@ async function exportStatement(){
   const st = state.stmt; if (!st) return;
   const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
   const cu = st.customer || {};
-  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>كشف حساب ${esc(cu.name||'')}</title><style>body{margin:18px;font-family:Tahoma,Arial,sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:right}td.n,th.n{text-align:left;direction:ltr}@media print{body{margin:8mm}}</style></head><body>${statementHtml(st)}<p style="font-size:11px;color:#777">اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p><script>(${alignHeads.toString()})(document)<\/script></body></html>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>كشف حساب ${esc(cu.name||'')}</title><style>body{margin:18px;font-family:Tahoma,Arial,sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:right}td.n,th.n{text-align:left;direction:ltr}@media print{body{margin:8mm}}</style></head><body>${statementHtml(st)}<p style="font-size:11px;color:#777">اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p><script>(${alignHeads.toString()})(document);(${enhanceTables.toString()})(document)<\/script></body></html>`;
   try { await dl.save({filename:`كشف حساب ${cu.name||''} ${st.from} - ${st.to}.html`, data:html}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
 }
 
@@ -906,6 +921,7 @@ function viewBank(){
       <div class="sec-head"><h3>إيداعات اليوم</h3><span class="controls"><label class="toggle"><input type="checkbox" id="showDel" ${state.showDeleted?'checked':''}> إظهار المحذوف</label></span></div>
       ${deps.length?`<div class="tablebox"><table id="tDep"><thead><tr><th>السيارة</th><th>النوع</th><th class="n">المبلغ</th><th>البنك</th><th>رقم الإيصال</th><th>الشيكات</th><th>الصورة</th><th>ملاحظة</th><th class="noexp"></th></tr></thead><tbody>
       ${deps.map(d=>`<tr class="${d.deleted?'gone':''}"><td class="keep">${d.van_no?vanPill(d.van_no):'المكتب'}</td><td>${DEP_KIND[d.kind]}</td><td class="n">${jd(d.amount)}</td><td>${esc(d.bank||'')}</td><td>${esc(d.reference||'')}</td><td style="white-space:normal;font-size:.78rem">${(d.cheques||[]).map(c=>esc(c.customer_name)+' '+jd(c.amount)).join('، ')}</td><td class="keep">${d.source==='excel_import'?'<span class="muted" style="font-size:.78rem">من الإكسل</span>':photoCell('deposit', d.id, d.has_photo, DEP_KIND[d.kind]+' '+jd(d.amount), state.day, d.van_no)}</td><td>${esc(d.note||'')}</td><td class="noexp keep">${D.closed?'':d.deleted?resBtn('bank_deposits',d.id):`<span class="actions"><button type="button" class="icon-btn" data-editdep="${d.id}">تعديل</button>${delBtn('bank_deposits',d.id,'حذف '+DEP_KIND[d.kind]+' '+jd(d.amount))}</span>`}</td></tr>`).join('')}
+      ${(()=>{const lv=deps.filter(d=>!d.deleted);return `<tr class="total"><td colspan="2">الاجمالي · ${lv.length} إيداع</td><td class="n">${jd(sum(lv,'amount'))}</td><td colspan="5"></td><td class="noexp"></td></tr>`;})()}
       </tbody></table></div>`:'<div class="panel empty">لا إيداعات في هذا اليوم.</div>'}
     </div>
     <div>
@@ -1120,6 +1136,26 @@ function viewToday(){
 
 const delBtn = (table,id,label) => `<button type="button" class="icon-btn del" data-del="${table}" data-id="${id}" data-label="${esc(label)}">حذف</button>`;
 const resBtn = (table,id) => `<button type="button" class="icon-btn" data-restore="${table}" data-id="${id}">استرجاع</button>`;
+const delBatchBtn = (b,company,total) => `<button type="button" class="icon-btn del" data-delbatch="${b}" data-label="${esc('حذف فاتورة '+company+' كاملة · '+jd(total))}">حذف الفاتورة كاملة</button>`;
+const resBatchBtn = b => `<button type="button" class="icon-btn" data-resbatch="${b}">استرجاع الفاتورة</button>`;
+// edit/delete straight from a report row (any day): opens that day, then the usual form
+const repActs = (kind,id,day,table,label) => `<span class="actions"><button type="button" class="icon-btn" data-redit="${kind}" data-id="${id}" data-day="${day}">تعديل</button>${delBtn(table,id,label)}</span>`;
+function confirmDeleteBatch(title, batch){
+  openModal(`<h2>${esc(title)}</h2>
+    <p class="muted" style="margin:0;font-size:.88rem">كل أسطر هذه الفاتورة تُعلَّم كمحذوفة وتخرج من الحسابات والكلفة مرة واحدة. يمكن استرجاعها لاحقاً بزر «استرجاع الفاتورة» مع «إظهار المحذوف».</p>
+    <div class="field"><label for="f_reason">سبب الحذف (مطلوب)</label><input id="f_reason" name="reason" required placeholder="مثال: فاتورة مكررة"></div>`,
+    async fd => {
+      const reason = (fd.get('reason')||'').trim();
+      if (!reason) throw {message:'ERROR: اكتب سبب الحذف'};
+      const r = await sql(`select office_remove_purchase_receipt(${lit(batch)}::uuid, ${lit(reason)}, ${lit(ACTOR)}) as n`);
+      return `حُذفت الفاتورة كاملة (${(r[0]&&r[0].n)||''} أسطر)`;
+    });
+  $('#msave').textContent = 'حذف الفاتورة'; $('#msave').classList.add('danger');
+}
+async function openOnDay(d, fn){
+  if (d && state.day !== d) { state.day = d; dayInput.value = d; try{localStorage.setItem('kv_live_day',d);}catch(e){} await load(); }
+  fn();
+}
 
 function viewSheet(){
   const showDel = state.showDeleted;
@@ -1144,7 +1180,8 @@ function viewSheet(){
     <div>
       <div class="sec-head"><h3>المشتريات</h3><span class="controls">${pur.length?copyBtn('tPur'):''}${closed?'':'<button class="btn" type="button" data-act="newPurchase">+ مشتريات</button>'}</span></div>
       ${pur.length?`<div class="tablebox"><table id="tPur"><thead><tr><th>الشركة</th><th>الصنف</th><th class="n">الوزن</th><th class="n">السعر</th><th class="n">الاجمالي</th><th>المصدر</th><th class="noexp"></th></tr></thead><tbody>
-      ${Object.entries(pc).map(([c,rs])=>Object.values(by(rs, r=>r.batch)).map(bs=>bs.map(r=>`<tr class="crow ${r.deleted?'gone':''}" style="--cc:${ccol(c)}"><td>${cchip(c)}</td><td>${esc(r.item)}${num(r.price)===0?' <span class="pill good">وزن مجاني</span>':''}</td><td class="n">${kg(r.qty)}</td><td class="n">${fmt(r.price,3)}</td><td class="n">${jd(r.total)}</td><td class="keep muted" style="font-size:.78rem">${r.source==='dashboard'?'اللوحة':r.source==='app'?'التطبيق':'الإكسل'}${r.updated_by?' · '+esc(r.updated_by):''}</td><td class="noexp keep">${closed?'':r.deleted?resBtn('purchases',r.id):`<span class="actions"><button type="button" class="icon-btn" data-editp="${r.id}">تعديل</button>${delBtn('purchases',r.id,'حذف سطر مشتريات: '+r.item+' '+kg(r.qty)+' كغم')}</span>`}</td></tr>`).join('')+(()=>{const b=bs[0].batch, r0=rc(b)||{}, live=bs.filter(x=>!x.deleted); return `<tr class="sub crow" style="--cc:${ccol(c)}"><td colspan="2">فاتورة ${esc(c)}${Object.keys(by(rs,r=>r.batch)).length>1?'':''}</td><td class="n">${kg(sum(live,'qty'))}</td><td></td><td class="n">${jd(sum(live,'total'))}</td><td class="keep">${live.length?(bs[0].source==='excel_import'&&!r0.has_photo?'<span class="muted" style="font-size:.75rem">من الإكسل</span>':photoCell('purchase', b, r0.has_photo, c+' · '+jd(sum(live,'total')), state.day, bs[0].van_no)):''}</td><td class="noexp"></td></tr>`;})()).join('')).join('')}
+      ${Object.entries(pc).map(([c,rs])=>Object.values(by(rs, r=>r.batch)).map(bs=>bs.map(r=>`<tr class="crow ${r.deleted?'gone':''}" style="--cc:${ccol(c)}"><td>${cchip(c)}</td><td>${esc(r.item)}${num(r.price)===0?' <span class="pill good">وزن مجاني</span>':''}</td><td class="n">${kg(r.qty)}</td><td class="n">${fmt(r.price,3)}</td><td class="n">${jd(r.total)}</td><td class="keep muted" style="font-size:.78rem">${r.source==='dashboard'?'اللوحة':r.source==='app'?'التطبيق':'الإكسل'}${r.updated_by?' · '+esc(r.updated_by):''}</td><td class="noexp keep">${closed?'':r.deleted?resBtn('purchases',r.id):`<span class="actions"><button type="button" class="icon-btn" data-editp="${r.id}">تعديل</button>${delBtn('purchases',r.id,'حذف سطر مشتريات: '+r.item+' '+kg(r.qty)+' كغم')}</span>`}</td></tr>`).join('')+(()=>{const b=bs[0].batch, r0=rc(b)||{}, live=bs.filter(x=>!x.deleted); return `<tr class="sub crow" style="--cc:${ccol(c)}"><td colspan="2">فاتورة ${esc(c)}${Object.keys(by(rs,r=>r.batch)).length>1?'':''}</td><td class="n">${kg(sum(live,'qty'))}</td><td></td><td class="n">${jd(sum(live,'total'))}</td><td class="keep">${live.length?(bs[0].source==='excel_import'&&!r0.has_photo?'<span class="muted" style="font-size:.75rem">من الإكسل</span>':photoCell('purchase', b, r0.has_photo, c+' · '+jd(sum(live,'total')), state.day, bs[0].van_no)):''}</td><td class="noexp keep">${closed?'':live.length?delBatchBtn(b, c, sum(live,'total')):bs.some(x=>x.deleted)?resBatchBtn(b):''}</td></tr>`;})()).join('')).join('')}
+      ${(()=>{const lv=pur.filter(p=>!p.deleted);return `<tr class="total"><td colspan="2">اجمالي مشتريات اليوم · ${Object.keys(by(lv,r=>r.batch)).length} فاتورة</td><td class="n">${kg(sum(lv,'qty'))}</td><td class="n" title="متوسط سعر الكيلو">${fmt(ratio(lv,'total','qty'),3)}</td><td class="n">${jd(sum(lv,'total'))}</td><td></td><td class="noexp"></td></tr>`;})()}
       </tbody></table></div>`:`<div class="panel empty">لا مشتريات في هذا اليوم.</div>`}
     </div>
 
@@ -1166,11 +1203,11 @@ function viewSheet(){
     <div class="grid2">
       <div>
         <div class="sec-head"><h3>المصاريف</h3><span class="controls">${closed?'':'<button class="btn sec" type="button" data-act="newExpense">+ مصروف</button>'}</span></div>
-        ${ex.length?`<div class="tablebox"><table><thead><tr><th>النوع</th><th>من</th><th class="n">المبلغ</th><th>الصورة</th><th class="noexp"></th></tr></thead><tbody>${ex.map(m=>`<tr class="${m.deleted?'gone':''}"><td>${esc(m.category||'')}</td><td class="keep">${m.van_no?vanPill(m.van_no):'المكتب'}</td><td class="n">${jd(m.amount)}</td><td class="keep">${photoCell('expense', m.id, m.has_photo, (m.category||'')+' '+jd(m.amount), state.day, m.van_no)}</td><td class="noexp keep">${closed?'':m.deleted?resBtn('cash_movements',m.id):`<span class="actions"><button type="button" class="icon-btn" data-editexp="${m.id}">تعديل</button>${delBtn('cash_movements',m.id,'حذف مصروف '+(m.category||'')+' '+jd(m.amount))}</span>`}</td></tr>`).join('')}</tbody></table></div>`:'<div class="panel empty">لا مصاريف.</div>'}
+        ${ex.length?`<div class="tablebox"><table><thead><tr><th>النوع</th><th>من</th><th class="n">المبلغ</th><th>الصورة</th><th class="noexp"></th></tr></thead><tbody>${ex.map(m=>`<tr class="${m.deleted?'gone':''}"><td>${esc(m.category||'')}</td><td class="keep">${m.van_no?vanPill(m.van_no):'المكتب'}</td><td class="n">${jd(m.amount)}</td><td class="keep">${photoCell('expense', m.id, m.has_photo, (m.category||'')+' '+jd(m.amount), state.day, m.van_no)}</td><td class="noexp keep">${closed?'':m.deleted?resBtn('cash_movements',m.id):`<span class="actions"><button type="button" class="icon-btn" data-editexp="${m.id}">تعديل</button>${delBtn('cash_movements',m.id,'حذف مصروف '+(m.category||'')+' '+jd(m.amount))}</span>`}</td></tr>`).join('')}<tr class="total"><td colspan="2">الاجمالي</td><td class="n">${jd(sum(ex.filter(m=>!m.deleted),'amount'))}</td><td></td><td class="noexp"></td></tr></tbody></table></div>`:'<div class="panel empty">لا مصاريف.</div>'}
       </div>
       <div>
         <div class="sec-head"><h3>الإيداعات البنكية</h3><span class="controls">${closed?'':'<button class="btn sec" type="button" data-act="newDeposit">+ إيداع</button>'}</span></div>
-        ${dps.length?`<div class="tablebox"><table><thead><tr><th>السيارة</th><th>النوع</th><th class="n">المبلغ</th><th>الصورة</th></tr></thead><tbody>${dps.map(d=>`<tr class="${d.deleted?'gone':''}"><td class="keep">${d.van_no?vanPill(d.van_no):'المكتب'}</td><td>${DEP_KIND[d.kind]}</td><td class="n">${jd(d.amount)}</td><td class="keep">${d.source==='excel_import'?'<span class="muted" style="font-size:.75rem">من الإكسل</span>':photoCell('deposit', d.id, d.has_photo, DEP_KIND[d.kind]+' '+jd(d.amount), state.day, d.van_no)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="panel empty">لا إيداعات. <a href="#bank">الإيداع والبنك</a></div>'}
+        ${dps.length?`<div class="tablebox"><table><thead><tr><th>السيارة</th><th>النوع</th><th class="n">المبلغ</th><th>الصورة</th></tr></thead><tbody>${dps.map(d=>`<tr class="${d.deleted?'gone':''}"><td class="keep">${d.van_no?vanPill(d.van_no):'المكتب'}</td><td>${DEP_KIND[d.kind]}</td><td class="n">${jd(d.amount)}</td><td class="keep">${d.source==='excel_import'?'<span class="muted" style="font-size:.75rem">من الإكسل</span>':photoCell('deposit', d.id, d.has_photo, DEP_KIND[d.kind]+' '+jd(d.amount), state.day, d.van_no)}</td></tr>`).join('')}<tr class="total"><td colspan="2">الاجمالي</td><td class="n">${jd(sum(dps.filter(d=>!d.deleted),'amount'))}</td><td></td></tr></tbody></table></div>`:'<div class="panel empty">لا إيداعات. <a href="#bank">الإيداع والبنك</a></div>'}
       </div>
     </div>
 
@@ -1178,6 +1215,7 @@ function viewSheet(){
       <div class="sec-head"><div><h3>الكميات والكلفة</h3><p>متوسط الكلفة = (كمية المدور الموجبة × كلفتها + مشتريات اليوم الموجبة) ÷ مجموع الكميات. بدون مشتريات تُعتمد كلفة الأمس.</p></div>${items.length?copyBtn('tCost'):''}</div>
       <div class="tablebox"><table id="tCost"><thead><tr><th>الصنف</th><th class="n">المدور</th><th class="n">كلفة المدور</th><th class="n">مشتريات</th><th class="n">وارد</th><th class="n">صادر</th><th class="n">المتوفر</th><th class="n">متوسط الكلفة</th><th class="n">الكلفة المعتمدة</th><th class="n">المباع</th><th class="n">المتبقي</th><th class="n">قيمة المتبقي</th><th>ملاحظة</th></tr></thead><tbody>
       ${items.map(r=>`<tr><td>${esc(r.item)}</td><td class="n${ncls(r.opening_qty)}">${kg(r.opening_qty)}</td><td class="n">${fmt(r.opening_cost,4)}</td><td class="n">${kg(r.purchase_qty)}</td><td class="n">${kg(r.transfer_in)}</td><td class="n">${kg(r.transfer_out)}</td><td class="n${ncls(r.available_qty)}">${kg(r.available_qty)}</td><td class="n">${fmt(r.avg_cost,4)}</td><td class="n"><b>${fmt(r.adopted_cost,4)}</b></td><td class="n">${kg(r.sold_qty)}</td><td class="n${ncls(r.closing_qty)}">${kg(r.closing_qty)}</td><td class="n${ncls(r.closing_value)}">${jd(r.closing_value)}</td><td>${r.cost_note?`<span class="pill ${/لا توجد/.test(r.cost_note)?'bad':'warn'}">${esc(r.cost_note)}</span>`:''}</td></tr>`).join('') || '<tr><td colspan="13" class="empty">لا حركة</td></tr>'}
+      ${items.length?`<tr class="total"><td>الاجمالي / المتوسط</td><td class="n${ncls(sum(items,'opening_qty'))}">${kg(sum(items,'opening_qty'))}</td><td class="n" title="متوسط مرجّح بكمية المدور">${fmt(wavg(items,'opening_cost','opening_qty'),4)}</td><td class="n">${kg(sum(items,'purchase_qty'))}</td><td class="n">${kg(sum(items,'transfer_in'))}</td><td class="n">${kg(sum(items,'transfer_out'))}</td><td class="n${ncls(sum(items,'available_qty'))}">${kg(sum(items,'available_qty'))}</td><td class="n" title="متوسط مرجّح بالمتوفر">${fmt(wavg(items,'avg_cost','available_qty'),4)}</td><td class="n" title="متوسط مرجّح بالمباع">${fmt(wavg(items,'adopted_cost','sold_qty'),4)}</td><td class="n">${kg(sum(items,'sold_qty'))}</td><td class="n${ncls(sum(items,'closing_qty'))}">${kg(sum(items,'closing_qty'))}</td><td class="n${ncls(sum(items,'closing_value'))}">${jd(sum(items,'closing_value'))}</td><td></td></tr>`:''}
       </tbody></table></div>
     </div>
 
@@ -1188,7 +1226,7 @@ function viewSheet(){
 
     <div>
       <div class="sec-head"><div><h3>مخزون السيارات والجرد</h3><p>الدفتري = البداية + المشتريات + الوارد − الصادر − المبيعات. الفرق موجب = نقص.</p></div></div>
-      <div class="grid2">${vanNos().map(v=>{const rs=vs.filter(x=>x.van_no==v);return `<div style="display:flex;flex-direction:column;gap:8px;min-width:0"><div class="sec-head" style="margin:0"><b>${vanName(v)}</b>${closed?'':`<button class="btn sec" type="button" data-count="${v}">إدخال الجرد</button>`}</div><div class="tablebox"><table><thead><tr><th>الصنف</th><th class="n">البداية</th><th class="n">مشتريات</th><th class="n">وارد</th><th class="n">صادر</th><th class="n">مبيعات</th><th class="n">الدفتري</th><th class="n">الجرد</th><th class="n">الفرق</th></tr></thead><tbody>${rs.length?rs.map(r=>`<tr><td>${esc(r.item)}</td><td class="n${ncls(r.opening)}">${kg(r.opening)}</td><td class="n">${kg(r.purchases)}</td><td class="n">${kg(r.transfer_in)}</td><td class="n">${kg(r.transfer_out)}</td><td class="n">${kg(r.sold)}</td><td class="n${ncls(r.book)}"><b>${kg(r.book)}</b></td><td class="n">${r.counted===null?'—':kg(r.counted)}</td><td class="n">${r.diff===null?'—':kg(r.diff)}</td></tr>`).join(''):`<tr><td colspan="9" class="empty">لا حركة</td></tr>`}</tbody></table></div></div>`}).join('')}</div>
+      <div class="grid2">${vanNos().map(v=>{const rs=vs.filter(x=>x.van_no==v);return `<div style="display:flex;flex-direction:column;gap:8px;min-width:0"><div class="sec-head" style="margin:0"><b>${vanName(v)}</b>${closed?'':`<button class="btn sec" type="button" data-count="${v}">إدخال الجرد</button>`}</div><div class="tablebox"><table><thead><tr><th>الصنف</th><th class="n">البداية</th><th class="n">مشتريات</th><th class="n">وارد</th><th class="n">صادر</th><th class="n">مبيعات</th><th class="n">الدفتري</th><th class="n">الجرد</th><th class="n">الفرق</th></tr></thead><tbody>${rs.length?rs.map(r=>`<tr><td>${esc(r.item)}</td><td class="n${ncls(r.opening)}">${kg(r.opening)}</td><td class="n">${kg(r.purchases)}</td><td class="n">${kg(r.transfer_in)}</td><td class="n">${kg(r.transfer_out)}</td><td class="n">${kg(r.sold)}</td><td class="n${ncls(r.book)}"><b>${kg(r.book)}</b></td><td class="n">${r.counted===null?'—':kg(r.counted)}</td><td class="n">${r.diff===null?'—':kg(r.diff)}</td></tr>`).join('')+`<tr class="total"><td>الاجمالي</td><td class="n${ncls(sum(rs,'opening'))}">${kg(sum(rs,'opening'))}</td><td class="n">${kg(sum(rs,'purchases'))}</td><td class="n">${kg(sum(rs,'transfer_in'))}</td><td class="n">${kg(sum(rs,'transfer_out'))}</td><td class="n">${kg(sum(rs,'sold'))}</td><td class="n${ncls(sum(rs,'book'))}"><b>${kg(sum(rs,'book'))}</b></td><td class="n">${rs.some(r=>r.counted!==null)?kg(sum(rs,'counted')):'—'}</td><td class="n">${rs.some(r=>r.diff!==null)?kg(sum(rs,'diff')):'—'}</td></tr>`:`<tr><td colspan="9" class="empty">لا حركة</td></tr>`}</tbody></table></div></div>`}).join('')}</div>
     </div>
   </section>`;
 }
@@ -1196,6 +1234,7 @@ function viewSheet(){
 function transferTable(t, id, editable=true){
   return `<div class="tablebox"><table id="${id}"><thead><tr><th>التاريخ</th><th>الصنف</th><th>من</th><th>الى</th><th>النوع</th><th class="n">الكمية</th><th class="n">كلفة الكيلو</th><th class="n">القيمة</th><th>مصدر الكلفة</th>${editable?'<th class="noexp"></th>':''}</tr></thead><tbody>
     ${t.map(x=>`<tr><td>${x.day}</td><td>${esc(x.item)}</td><td>${esc(x.from_name)}</td><td>${esc(x.to_name)}</td><td>${esc(x.direction)}</td><td class="n">${kg(x.qty)}</td><td class="n">${fmt(x.unit_cost,4)}</td><td class="n">${jd(x.total_cost)}</td><td>${{auto:'متوسط كلفة اليوم',manual:'يدوي',branch:'من الفرع'}[x.cost_source]||''}</td>${editable?`<td class="noexp"><span class="actions"><button type="button" class="icon-btn" data-edittrf="${x.id}">تعديل</button>${delBtn('transfers',x.id,'حذف تحويل '+x.item+' '+kg(x.qty)+' كغم')}</span></td>`:''}</tr>`).join('')}
+    ${Object.entries(by(t, x=>x.direction||'')).map(([dir,g])=>`<tr class="total"><td colspan="5">اجمالي ${esc(dir||'التحويلات')} · ${g.length} سطر</td><td class="n">${kg(sum(g,'qty'))}</td><td class="n" title="متوسط كلفة الكيلو = القيمة ÷ الكمية">${fmt(ratio(g,'total_cost','qty'),4)}</td><td class="n">${jd(sum(g,'total_cost'))}</td><td></td>${editable?'<td class="noexp"></td>':''}</tr>`).join('')}
   </tbody></table></div>`;
 }
 
@@ -1270,37 +1309,37 @@ function tablesFor(id, X){
       return [t]; }
     case 'daily': return [T('الحركة اليومية', [['day','اليوم','date'],['van_no','السيارة','van'],['invoices','فواتير','int'],['kg','الكمية','kg'],['sales','المبيعات','jd'],['cost','الكلفة','jd'],['profit','الربح','jd'],['collected','التحصيل','jd'],['purchases_kg','مشتريات (كغم)','kg'],['purchases','مشتريات (قيمة)','jd'],['expenses','مصاريف','jd']], X.daily, {total:true})];
     case 'van_performance': return [T('أداء السيارات', [['name','السيارة','text'],['driver_name','السائق','text'],['days','أيام البيع','int'],['invoices','فواتير','int'],['customers','عملاء','int'],['kg','الكمية','kg'],['sales','المبيعات','jd'],['avg_inv','متوسط الفاتورة','jd'],['profit','الربح','jd'],['margin','الهامش','pct'],['collected','التحصيل','jd'],['coll_ratio','التحصيل ÷ المبيعات','pct'],['expenses','مصاريف','jd'],['count_diff_kg','فرق الجرد (كغم)','kg'],['count_diff_value','فرق الجرد (قيمة)','jd']],
-      (X.van_performance||[]).map(r=>({...r, avg_inv: num(r.invoices)?r.sales/r.invoices:null, margin: num(r.sales)?r.profit/r.sales:null, coll_ratio: num(r.sales)?r.collected/r.sales:null})), {total:true})];
+      (X.van_performance||[]).map(r=>({...r, avg_inv: num(r.invoices)?r.sales/r.invoices:null, margin: num(r.sales)?r.profit/r.sales:null, coll_ratio: num(r.sales)?r.collected/r.sales:null})), {total:true, ratio:{avg_inv:['sales','invoices'], margin:['profit','sales'], coll_ratio:['collected','sales']}})];
     case 'by_customer': return [T('المبيعات حسب العميل', [['name','العميل','text'],['van_no','السيارة','van'],['invoices','فواتير','int'],['kg','الكمية','kg'],['sales','المبيعات','jd'],['cash','نقدي','jd'],['credit','ذمم','jd'],['avg_price','متوسط السعر','n3'],['profit','الربح','jd'],['margin','الهامش','pct'],['last_day','آخر شراء','date']],
-      (X.by_customer||[]).map(r=>({...r, margin: num(r.sales)?r.profit/r.sales:null})), {total:true})];
+      (X.by_customer||[]).map(r=>({...r, margin: num(r.sales)?r.profit/r.sales:null})), {total:true, ratio:{avg_price:['sales','kg'], margin:['profit','sales']}})];
     case 'by_item': return [T('المبيعات والأرباح حسب الصنف', [['item','الصنف','text'],['company','الشركة','text'],['kg','المباع (كغم)','kg'],['sales','المبيعات','jd'],['avg_price','متوسط البيع','n3'],['avg_cost','متوسط الكلفة','n4'],['profit','الربح','jd'],['margin','الهامش','pct'],['purchased_kg','المشترى (كغم)','kg'],['free_kg','منه مجاني','kg'],['purchased_value','قيمة المشتريات','jd'],['avg_buy_price','متوسط سعر الشراء','n3']],
-      (X.by_item||[]).map(r=>({...r, margin: num(r.sales)?r.profit/r.sales:null})), {total:true})];
+      (X.by_item||[]).map(r=>({...r, margin: num(r.sales)?r.profit/r.sales:null})), {total:true, ratio:{avg_price:['sales','kg'], avg_cost:['cost','kg'], margin:['profit','sales'], avg_buy_price:['purchased_value','purchased_kg']}})];
     case 'invoices': {
       if (rep.options.with_lines) {
         const rows = []; (X.invoices||[]).forEach(v => (v.lines||[]).forEach((l,i)=>rows.push({day:i?'':v.day, van_no:i?null:v.van_no, number:i?'':v.number, customer_name:i?'':v.customer_name, receipt_type:i?'':v.receipt_type, item:l.item, qty:l.qty, price:l.price, total:l.total, cost:l.cost})));
-        return [T('سجل الفواتير (بالأصناف)', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','الفاتورة','text'],['customer_name','العميل','text'],['receipt_type','النوع','text'],['item','الصنف','text'],['qty','الكمية','kg'],['price','السعر','n3'],['total','الاجمالي','jd'],['cost','الكلفة','jd']], rows, {total:true})];
+        return [T('سجل الفواتير (بالأصناف)', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','الفاتورة','text'],['customer_name','العميل','text'],['receipt_type','النوع','text'],['item','الصنف','text'],['qty','الكمية','kg'],['price','السعر','n3'],['total','الاجمالي','jd'],['cost','الكلفة','jd']], rows, {total:true, ratio:{price:['total','qty']}})];
       }
       return [T('سجل الفواتير', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','الفاتورة','text'],['customer_name','العميل','text'],['receipt_type','النوع','text'],['kg','الكمية','kg'],['total','المبلغ','jd'],['cost','الكلفة','jd'],['profit','الربح','jd']], (X.invoices||[]).map(r=>({...r, number: r.number + (r.edited?' (معدّلة)':'')})), {total:true})]; }
-    case 'collections': return [T('سجل التسديدات', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','السند','text'],['customer_name','العميل','text'],['method','النوع','text'],['invoice_number','عن فاتورة','text'],['amount','المبلغ','jd']], X.collections, {total:true})];
+    case 'collections': return [T('سجل التسديدات', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','السند','text'],['customer_name','العميل','text'],['method','النوع','text'],['invoice_number','عن فاتورة','text'],['amount','المبلغ','jd']], X.collections, {total:true, act: r => r.id ? repActs('col', r.id, r.day, 'collections', 'حذف سند '+(r.number||'')+' — '+(r.customer_name||'')+' '+jd(r.amount)) : ''})];
     case 'balances': return [T('الذمم وأعمارها', [['number','#','int'],['name','العميل','text'],['van_no','السيارة','van'],['opening','أول الفترة','jd'],['sales','المبيعات','jd'],['paid','التسديدات','jd'],['closing','آخر الفترة','jd'],['cheques_pending','شيكات','jd'],['total_due','المجموع','jd'],['credit_limit','السقف','jd'],['over_limit','فوق السقف','jd'],['age_0_7','0–7 أيام','jd'],['age_8_15','8–15','jd'],['age_16_30','16–30','jd'],['age_31_60','31–60','jd'],['age_60p','+60','jd'],['last_payment','آخر دفعة','date']], X.balances, {total:true, totalSkip:['number','credit_limit','over_limit']})];
     case 'statements': return (X.statements||[]).map(s=>{ let run = num(s.opening)||0; const rows=[{day:'', kind:'رصيد أول الفترة', ref:'', debit:null, credit:null, bal:run}];
       (s.rows||[]).forEach(x=>{ run += (num(x.debit)||0)-(num(x.credit)||0); rows.push({day:x.day, kind:x.kind, ref:x.ref, debit:num(x.debit)||null, credit:num(x.credit)||null, bal:run}); });
       return T('كشف حساب: '+s.name+' · '+vn(s.van_no), [['day','التاريخ','date'],['kind','البيان','text'],['ref','المرجع','text'],['debit','مدين','jd'],['credit','دائن','jd'],['bal','الرصيد','jd']], rows); });
     case 'cheques': return [T('الشيكات', [['cheque_no','رقم الشيك','text'],['customer_name','العميل','text'],['van_no','السيارة','van'],['amount','المبلغ','jd'],['received_on','الاستلام','date'],['due_on','الاستحقاق','date'],['status','الحالة','text'],['collected_on','التحصيل','date']], X.cheques, {total:true})];
-    case 'purchases_by_company': return [T('المشتريات حسب الشركة', [['company','الشركة','text'],['kg','الكمية','kg'],['free_kg','منها مجاني','kg'],['value','القيمة','jd'],['avg_paid_price','متوسط السعر المدفوع','n3'],['effective_price','السعر الفعلي مع المجاني','n3'],['receipts','عدد الفواتير','int'],['receipts_with_photo','منها بصورة','int']], X.purchases_by_company, {total:true})];
-    case 'purchases': return [T('سجل المشتريات', [['day','التاريخ','date'],['company','الشركة','text'],['item','الصنف','text'],['qty','الوزن','kg'],['price','السعر','n3'],['total','الاجمالي','jd'],['van_no','السيارة','van']], X.purchases, {total:true})];
-    case 'item_movement': return [T('حركة الأصناف والكلفة', [['item','الصنف','text'],['opening_qty','أول المدة','kg'],['opening_cost','كلفة أول المدة','n4'],['purchased','مشتريات','kg'],['transfer_in','وارد','kg'],['transfer_out','صادر','kg'],['sold','مبيعات','kg'],['closing_qty','آخر المدة','kg'],['closing_cost','الكلفة','n4'],['closing_value','القيمة','jd'],['cogs','كلفة المبيعات','jd']], X.item_movement, {total:true, totalSkip:['opening_cost','closing_cost']})];
+    case 'purchases_by_company': return [T('المشتريات حسب الشركة', [['company','الشركة','text'],['kg','الكمية','kg'],['free_kg','منها مجاني','kg'],['value','القيمة','jd'],['avg_paid_price','متوسط السعر المدفوع','n3'],['effective_price','السعر الفعلي مع المجاني','n3'],['receipts','عدد الفواتير','int'],['receipts_with_photo','منها بصورة','int']], X.purchases_by_company, {total:true, ratio:{avg_paid_price:['value', r=>(num(r.kg)||0)-(num(r.free_kg)||0)], effective_price:['value','kg']}})];
+    case 'purchases': return [T('سجل المشتريات', [['day','التاريخ','date'],['company','الشركة','text'],['item','الصنف','text'],['qty','الوزن','kg'],['price','السعر','n3'],['total','الاجمالي','jd'],['van_no','السيارة','van']], X.purchases, {total:true, ratio:{price:['total','qty']}, act: r => r.id ? `<span class="actions"><button type="button" class="icon-btn" data-redit="pur" data-id="${r.id}" data-day="${r.day}">تعديل</button>${delBtn('purchases', r.id, 'حذف سطر مشتريات: '+r.item+' '+kg(r.qty)+' كغم')}${r.batch?`<button type="button" class="icon-btn del" data-delbatch="${r.batch}" data-label="${esc('حذف فاتورة '+r.company+' كاملة · '+dmy(r.day))}">الفاتورة كاملة</button>`:''}</span>` : ''})];
+    case 'item_movement': return [T('حركة الأصناف والكلفة', [['item','الصنف','text'],['opening_qty','أول المدة','kg'],['opening_cost','كلفة أول المدة','n4'],['purchased','مشتريات','kg'],['transfer_in','وارد','kg'],['transfer_out','صادر','kg'],['sold','مبيعات','kg'],['closing_qty','آخر المدة','kg'],['closing_cost','الكلفة','n4'],['closing_value','القيمة','jd'],['cogs','كلفة المبيعات','jd']], X.item_movement, {total:true, wavg:{opening_cost:'opening_qty'}, ratio:{closing_cost:['closing_value','closing_qty']}})];
     case 'van_stock': return [
       T('مخزون السيارات', [['van_no','السيارة','van'],['item','الصنف','text'],['opening','أول الفترة','kg'],['purchases','مشتريات','kg'],['transfer_in','وارد','kg'],['transfer_out','صادر','kg'],['sold','مبيعات','kg'],['book_end','الدفتري آخر الفترة','kg'],['counts','مرات الجرد','int'],['count_diff','فرق الجرد (كغم)','kg'],['count_diff_value','فرق الجرد (قيمة)','jd']], X.van_stock, {total:true}),
       T('أيام الجرد', [['day','اليوم','date'],['van_no','السيارة','van'],['item','الصنف','text'],['book','الدفتري','kg'],['counted','الفعلي','kg'],['diff','الفرق (+ نقص)','kg'],['diff_value','قيمة الفرق','jd']], X.count_days, {total:true, totalSkip:['book','counted']})];
     case 'transfers': return [
-      T('ملخص التحويلات لكل مكان', [['name','المكان','text'],['qty_in','وارد (كغم)','kg'],['cost_in','قيمة الوارد','jd'],['qty_out','صادر (كغم)','kg'],['cost_out','قيمة الصادر','jd']], X.transfers_by_place),
-      T('سجل التحويلات', [['day','التاريخ','date'],['item','الصنف','text'],['from_name','من','text'],['to_name','الى','text'],['direction','النوع','text'],['qty','الكمية','kg'],['unit_cost','كلفة الكيلو','n4'],['total_cost','القيمة','jd']], X.transfers, {total:true, totalSkip:['unit_cost']})];
+      T('ملخص التحويلات لكل مكان', [['name','المكان','text'],['qty_in','وارد (كغم)','kg'],['cost_in','قيمة الوارد','jd'],['qty_out','صادر (كغم)','kg'],['cost_out','قيمة الصادر','jd']], X.transfers_by_place, {total:true}),
+      T('سجل التحويلات', [['day','التاريخ','date'],['item','الصنف','text'],['from_name','من','text'],['to_name','الى','text'],['direction','النوع','text'],['qty','الكمية','kg'],['unit_cost','كلفة الكيلو','n4'],['total_cost','القيمة','jd']], X.transfers, {total:true, ratio:{unit_cost:['total_cost','qty']}})];
     case 'expenses': return [T('المصاريف حسب النوع', [['category','النوع','text'],['n','عدد','int'],['amount','المبلغ','jd']], X.expenses_by_category, {total:true}),
               T('سجل المصاريف', [['day','التاريخ','date'],['category','النوع','text'],['van_no','دُفع من','van'],['method','الطريقة','text'],['amount','المبلغ','jd'],['photo','الصورة','text'],['note','ملاحظة','text']], (X.expenses||[]).map(m=>({...m, photo:m.has_photo?'✔':'بلا صورة'})), {total:true})];
     case 'cash': return [T('الإيداع والبنك لكل سيارة', [['name','السيارة','text'],['opening_undeposited','غير مودع أول الفترة','jd'],['cash_in','تسديدات نقدية','jd'],['cheque_in','شيكات','jd'],['cash_expenses','مصاريف نقدية','jd'],['dep_cash','إيداع نقدي','jd'],['dep_cheque','إيداع شيكات','jd'],['closing_cash','غير مودع: نقد','jd'],['closing_cheques','غير مودع: شيكات','jd'],['closing_undeposited','غير مودع آخر الفترة','jd'],['bank_in','كليك (للعلم)','jd']], X.bank, {total:true}),
               T('يوماً بيوم', [['day','اليوم','date'],['van_no','السيارة','van'],['carried','مدور من الأمس','jd'],['cash_in','تسديدات نقدية','jd'],['cheque_in','شيكات','jd'],['cash_expenses','مصاريف نقدية','jd'],['dep_cash','إيداع نقدي','jd'],['dep_cheque','إيداع شيكات','jd'],['undeposited','غير مودع','jd']], X.bank_days, {total:true, totalSkip:['carried','undeposited']}),
-              T('سجل الإيداعات', [['day','التاريخ','date'],['van_no','السيارة','van'],['kind_name','النوع','text'],['amount','المبلغ','jd'],['bank','البنك','text'],['reference','رقم الإيصال','text'],['photo','الصورة','text'],['note','ملاحظة','text']], (X.deposits||[]).map(d=>({...d, kind_name:DEP_KIND[d.kind], photo:d.source==='excel_import'?'من الإكسل':d.has_photo?'✔':'بلا صورة'})), {total:true})];
+              T('سجل الإيداعات', [['day','التاريخ','date'],['van_no','السيارة','van'],['kind_name','النوع','text'],['amount','المبلغ','jd'],['bank','البنك','text'],['reference','رقم الإيصال','text'],['photo','الصورة','text'],['note','ملاحظة','text']], (X.deposits||[]).map(d=>({...d, kind_name:DEP_KIND[d.kind], photo:d.source==='excel_import'?'من الإكسل':d.has_photo?'✔':'بلا صورة'})), {total:true, act: d => d.id ? repActs('dep', d.id, d.day, 'bank_deposits', 'حذف '+(DEP_KIND[d.kind]||'إيداع')+' '+jd(d.amount)) : ''})];
     case 'documents': { const dd = X.documents||{}, mm = dd.missing||{}; const miss = ['purchase','expense','deposit'].flatMap(k=>(mm[k]||[]).map(r=>({...r, kind:KIND_LABEL[k]})));
       return [T('ينقصها صورة', [['day','التاريخ','date'],['van_no','السيارة','van'],['kind','النوع','text'],['title','البيان','text']], miss),
               T('الصور المحفوظة', [['day','التاريخ','date'],['van_no','السيارة','van'],['kind_name','النوع','text'],['title','البيان','text'],['uploaded_by','رفعها','text']], (dd.photos||[]).map(p=>({...p, kind_name:KIND_LABEL[p.kind]||p.kind})))]; }
@@ -1325,17 +1364,21 @@ function cellText(v, t, row){
 const isNumT = t => ['jd','kg','n3','n4','int','pct','auto'].includes(t);
 function totalsOf(tb){
   const tot = {}; tb.cols.forEach(([k,,t])=>{ if (['jd','kg','int'].includes(t) && !(tb.totalSkip||[]).includes(k)) tot[k] = sum(tb.rows, k); });
+  // averages are never added up: the total row shows the true average of the whole table
+  Object.entries(tb.ratio||{}).forEach(([k,[a,b]])=>{ tot[k] = ratio(tb.rows, a, b); });
+  Object.entries(tb.wavg||{}).forEach(([k,w])=>{ tot[k] = wavg(tb.rows, k, w); });
   return tot;
 }
+const totLabel = tb => (tb.ratio||tb.wavg) ? 'الاجمالي / المتوسط' : 'الاجمالي';
 function renderTable(tb, idx, secTitle){
   const id = 'rt'+idx;
   const h3 = tb.title === secTitle ? '' : `<h3>${esc(tb.title)}</h3>`;
   if (!tb.rows.length) return `<div><div class="sec-head">${h3}</div><div class="panel empty">لا بيانات في هذه الفترة.</div></div>`;
   const tot = tb.total ? totalsOf(tb) : null;
   return `<div><div class="sec-head"><div>${h3}${tb.note?`<p>${esc(tb.note)}</p>`:''}</div>${copyBtn(id)}</div>
-    <div class="tablebox"><table id="${id}"><thead><tr>${tb.cols.map(([k,l,t])=>`<th class="${isNumT(t)?'n':''}">${esc(l)}</th>`).join('')}</tr></thead><tbody>
-    ${tb.rows.map(r=>`<tr>${tb.cols.map(([k,l,t])=>`<td class="${isNumT(t)?'n':''}${isNumT(t)&&num(r[k])<0?' neg':''}">${esc(cellText(r[k],t,r))}</td>`).join('')}</tr>`).join('')}
-    ${tot?`<tr class="total">${tb.cols.map(([k,,t],i)=>`<td class="${isNumT(t)?'n':''}">${i===0?'الاجمالي':(k in tot?esc(cellText(tot[k],t,{})):'')}</td>`).join('')}</tr>`:''}
+    <div class="tablebox"><table id="${id}"><thead><tr>${tb.cols.map(([k,l,t])=>`<th class="${isNumT(t)?'n':''}">${esc(l)}</th>`).join('')}${tb.act?'<th class="noexp"></th>':''}</tr></thead><tbody>
+    ${tb.rows.map(r=>`<tr>${tb.cols.map(([k,l,t])=>`<td class="${isNumT(t)?'n':''}${isNumT(t)&&num(r[k])<0?' neg':''}">${esc(cellText(r[k],t,r))}</td>`).join('')}${tb.act?`<td class="noexp keep">${tb.act(r)}</td>`:''}</tr>`).join('')}
+    ${tot?`<tr class="total">${tb.cols.map(([k,,t],i)=>`<td class="${isNumT(t)?'n':''}"${(tb.ratio&&tb.ratio[k])||(tb.wavg&&tb.wavg[k])?' title="متوسط مرجّح للجدول كله"':''}>${i===0?totLabel(tb):(k in tot?esc(cellText(tot[k],t,{})):'')}</td>`).join('')}${tb.act?'<td class="noexp"></td>':''}</tr>`:''}
     </tbody></table></div></div>`;
 }
 function reportTitle(){
@@ -1414,7 +1457,7 @@ function reportSheets(){
     tablesFor(s.id, R).forEach(tb=>{
       aoa.push([tb.title]); aoa.push(tb.cols.map(c=>c[1]));
       tb.rows.forEach(r=>aoa.push(tb.cols.map(([k,,ty])=>{ const v=r[k]; const tt = ty==='auto' ? (r._t||'jd') : ty; if (v===null||v===undefined||v==='') return ''; if (tt==='van') return vanName(v); if (['jd','kg','n3','n4','int','pct'].includes(tt)) return Number(v); return String(v); })));
-      if (tb.total && tb.rows.length) { const tot = totalsOf(tb); aoa.push(tb.cols.map(([k],i)=>i===0?'الاجمالي':(k in tot?Number(tot[k]):''))); }
+      if (tb.total && tb.rows.length) { const tot = totalsOf(tb); aoa.push(tb.cols.map(([k],i)=>i===0?totLabel(tb):(k in tot?Number(tot[k]):''))); }
       aoa.push([]);
     });
     return {name: s.t.slice(0,31).replace(/[\\\/\?\*\[\]:]/g,' '), aoa};
@@ -1431,8 +1474,8 @@ async function exportXlsx(){
 async function exportHtml(){
   const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
   const t = reportTitle();
-  const body = SECTIONS.filter(s=>rep.sections.includes(s.id)).map(s=>`<h2>${esc(s.t)}</h2>`+tablesFor(s.id,R).map(tb=>{ const tot = tb.total?totalsOf(tb):null; return `<h3>${esc(tb.title)}</h3>`+(tb.rows.length?`<table><thead><tr>${tb.cols.map(c=>`<th>${esc(c[1])}</th>`).join('')}</tr></thead><tbody>${tb.rows.map(r=>`<tr>${tb.cols.map(([k,,ty])=>`<td class="${isNumT(ty)?'n':''}">${esc(cellText(r[k],ty,r))}</td>`).join('')}</tr>`).join('')}${tot?`<tr class="t">${tb.cols.map(([k,,ty],i)=>`<td class="n">${i===0?'الاجمالي':(k in tot?esc(cellText(tot[k],ty,{})):'')}</td>`).join('')}</tr>`:''}</tbody></table>`:'<p>لا بيانات.</p>'); }).join('')).join('');
-  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير خيرات العز</title><style>body{font-family:Tahoma,Arial,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0}h2{font-size:15px;border-bottom:2px solid #1d6b58;padding-bottom:4px;margin-top:22px}h3{font-size:13px;margin:12px 0 6px}table{border-collapse:collapse;width:100%;font-size:11px;margin-bottom:8px}th,td{border:1px solid #ccc;padding:4px 6px;text-align:right}th{background:#eef2f0}td.n,th.n{text-align:left;direction:ltr}tr.t td{font-weight:bold;background:#f5f7f6}.meta{color:#555;font-size:12px}@media print{h2{page-break-after:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}}</style></head><body><h1>شركة خيرات العز للدواجن والمجمدات</h1><p class="meta">${esc(t.period)} · ${esc(t.vans)} · أُعدّ ${new Date().toLocaleString('ar-JO-u-nu-latn')}</p>${body}<p class="meta">افتح الملف في المتصفح ثم اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p><script>(${alignHeads.toString()})(document)<\/script></body></html>`;
+  const body = SECTIONS.filter(s=>rep.sections.includes(s.id)).map(s=>`<h2>${esc(s.t)}</h2>`+tablesFor(s.id,R).map(tb=>{ const tot = tb.total?totalsOf(tb):null; return `<h3>${esc(tb.title)}</h3>`+(tb.rows.length?`<table><thead><tr>${tb.cols.map(c=>`<th>${esc(c[1])}</th>`).join('')}</tr></thead><tbody>${tb.rows.map(r=>`<tr>${tb.cols.map(([k,,ty])=>`<td class="${isNumT(ty)?'n':''}">${esc(cellText(r[k],ty,r))}</td>`).join('')}</tr>`).join('')}${tot?`<tr class="t">${tb.cols.map(([k,,ty],i)=>`<td class="n">${i===0?totLabel(tb):(k in tot?esc(cellText(tot[k],ty,{})):'')}</td>`).join('')}</tr>`:''}</tbody></table>`:'<p>لا بيانات.</p>'); }).join('')).join('');
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير خيرات العز</title><style>body{font-family:Tahoma,Arial,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0}h2{font-size:15px;border-bottom:2px solid #1d6b58;padding-bottom:4px;margin-top:22px}h3{font-size:13px;margin:12px 0 6px}table{border-collapse:collapse;width:100%;font-size:11px;margin-bottom:8px}th,td{border:1px solid #ccc;padding:4px 6px;text-align:right}th{background:#eef2f0}td.n,th.n{text-align:left;direction:ltr}tr.t td{font-weight:bold;background:#f5f7f6}.meta{color:#555;font-size:12px}@media print{h2{page-break-after:avoid}table{page-break-inside:auto}tr{page-break-inside:avoid}}</style></head><body><h1>شركة خيرات العز للدواجن والمجمدات</h1><p class="meta">${esc(t.period)} · ${esc(t.vans)} · أُعدّ ${new Date().toLocaleString('ar-JO-u-nu-latn')}</p>${body}<p class="meta">افتح الملف في المتصفح ثم اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p><script>(${alignHeads.toString()})(document);(${enhanceTables.toString()})(document)<\/script></body></html>`;
   try { await dl.save({filename:`تقرير خيرات العز ${R.from} - ${R.to}.html`, data:html}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
 }
 
@@ -1484,7 +1527,7 @@ function viewVans(){
       </details>
       <div style="margin-top:12px" class="controls"><button class="btn sec" type="button" data-vanlog="${v.van_no}">سجل التحويلات (آخر 30 يوماً)</button><button class="btn sec" type="button" data-pin="${v.van_no}">🔑 رمز دخول التطبيق</button>${(()=>{const dv=state.devices; if(!dv) return ''; const pv=(dv.vans||[]).find(x=>x.van_no==v.van_no)||{}; const ds=(dv.devices||[]).filter(x=>x.van_no==v.van_no); return `<span class="pill ${pv.has_pin?'good':'bad'}">${pv.has_pin?'له رمز':'بلا رمز'}</span> <span class="muted" style="font-size:.8rem">${ds.length} جهاز مسجّل</span>`;})()}</div>
       ${state.devices?(()=>{const ds=(state.devices.devices||[]).filter(x=>x.van_no==v.van_no); return ds.length?`<div class="tablebox" style="margin-top:8px"><table><thead><tr><th>الجهاز</th><th>الإصدار</th><th>آخر اتصال</th><th></th></tr></thead><tbody>${ds.map(d=>`<tr><td>${esc(d.device||'')}</td><td>${esc(d.app_version||'')}</td><td>${new Date(d.last_seen).toLocaleString('ar-JO-u-nu-latn',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'})}</td><td><button type="button" class="icon-btn del" data-revoke="${esc(d.token_hash)}">إخراج</button></td></tr>`).join('')}</tbody></table></div>`:'';})():''}
-      ${lg.van==v.van_no?(lg.rows&&lg.rows.length?`<div class="tablebox" style="margin-top:8px"><table><thead><tr><th>التاريخ</th><th>الصنف</th><th>النوع</th><th>من / الى</th><th class="n">الكمية</th><th class="n">الكلفة</th><th class="n">القيمة</th></tr></thead><tbody>${lg.rows.map(r=>`<tr><td>${r.day}</td><td>${esc(r.item)}</td><td><span class="pill ${r.direction==='وارد'?'good':'warn'}">${r.direction}</span></td><td>${esc(r.other_side)}</td><td class="n">${kg(r.qty)}</td><td class="n">${fmt(r.unit_cost,4)}</td><td class="n">${jd(r.total_cost)}</td></tr>`).join('')}</tbody></table></div>`:`<div class="panel empty" style="margin-top:8px">${lg.rows?'لا تحويلات تخص هذه السيارة في آخر 30 يوماً.':'جارٍ التحميل…'}</div>`):''}
+      ${lg.van==v.van_no?(lg.rows&&lg.rows.length?`<div class="tablebox" style="margin-top:8px"><table><thead><tr><th>التاريخ</th><th>الصنف</th><th>النوع</th><th>من / الى</th><th class="n">الكمية</th><th class="n">الكلفة</th><th class="n">القيمة</th></tr></thead><tbody>${lg.rows.map(r=>`<tr><td>${r.day}</td><td>${esc(r.item)}</td><td><span class="pill ${r.direction==='وارد'?'good':'warn'}">${r.direction}</span></td><td>${esc(r.other_side)}</td><td class="n">${kg(r.qty)}</td><td class="n">${fmt(r.unit_cost,4)}</td><td class="n">${jd(r.total_cost)}</td></tr>`).join('')}${Object.entries(by(lg.rows, r=>r.direction)).map(([dir,g])=>`<tr class="total"><td colspan="4">اجمالي ${esc(dir)}</td><td class="n">${kg(sum(g,'qty'))}</td><td class="n">${fmt(ratio(g,'total_cost','qty'),4)}</td><td class="n">${jd(sum(g,'total_cost'))}</td></tr>`).join('')}</tbody></table></div>`:`<div class="panel empty" style="margin-top:8px">${lg.rows?'لا تحويلات تخص هذه السيارة في آخر 30 يوماً.':'جارٍ التحميل…'}</div>`):''}
     </div>`).join('')}</div>
   </section>`;
 }
@@ -1504,6 +1547,7 @@ function viewCheques(){
     <div class="sec-head"><div><h2>الشيكات</h2><p>يبقى الشيك «برسم التحصيل» على العميل حتى تغيّر حالته إلى «محصل». الشيك المرتجع يعود ديناً على العميل.</p></div><button class="btn" type="button" data-act="newCollection">+ سند بشيك</button></div>
     ${c.length?`<div class="tablebox"><table><thead><tr><th>رقم الشيك</th><th>العميل</th><th>السيارة</th><th class="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th><th>الحالة</th><th>تاريخ التحصيل</th></tr></thead><tbody>
     ${c.map(x=>`<tr><td>${esc(x.cheque_no)}</td><td>${esc(x.customer_name)}</td><td>${x.van_no?vanPill(x.van_no):''}</td><td class="n">${jd(x.amount)}</td><td>${x.received_on}</td><td>${x.due_on}</td><td><select data-cheque="${x.id}" aria-label="حالة الشيك">${opts(['برسم التحصيل','محصل','مرتجع'],x.status)}</select></td><td>${x.collected_on||'—'}</td></tr>`).join('')}
+    ${Object.entries(by(c, x=>x.status)).map(([st,g])=>`<tr class="total"><td colspan="3">مجموع «${esc(st)}» · ${g.length} شيك</td><td class="n">${jd(sum(g,'amount'))}</td><td colspan="4"></td></tr>`).join('')}
     </tbody></table></div>`:`<div class="panel empty">لا شيكات.</div>`}
   </section>`;
 }
@@ -1518,7 +1562,7 @@ function viewItems(){
   </section>`;
 }
 
-const VIEWER_TABS=[['today','ملخص اليوم'],['sheet','ورقة اليوم'],['bank','الإيداع والبنك'],['sales','المبيعات'],['purchases','المشتريات'],['expenses','المصاريف'],['docs','الصور والمستندات'],['reports','التقارير'],['pnl','الأرباح والخسائر'],['debts','العملاء والذمم'],['vans','السيارات'],['transfers','التحويلات والكلفة'],['cheques','الشيكات'],['items','الأصناف']];
+const VIEWER_TABS=[['today','ملخص اليوم'],['sheet','ورقة اليوم'],['bank','الإيداع والبنك'],['sales','المبيعات'],['purchases','المشتريات'],['stock','المخزون'],['expenses','المصاريف'],['docs','الصور والمستندات'],['reports','التقارير'],['pnl','الأرباح والخسائر'],['debts','العملاء والذمم'],['vans','السيارات'],['transfers','التحويلات والكلفة'],['cheques','الشيكات'],['items','الأصناف']];
 const tabLabel=k=>{const x=VIEWER_TABS.find(t=>t[0]===k);return x?x[1]:k;};
 const tabLevel=(v,k)=>{ if(!v) return 'view'; if(v.edit_tabs&&v.edit_tabs.includes(k)) return 'edit'; return (!v.tabs||!v.tabs.length||v.tabs.includes(k))?'view':'none'; };
 const viewerPages=v=>{ const all=VIEWER_TABS.map(t=>t[0]), ed=v.edit_tabs||[], see=(v.tabs&&v.tabs.length)?v.tabs:all;
@@ -1597,7 +1641,7 @@ const TH = h => `<th style="background:#1d6b58;color:#fff;position:static">${h}<
 const TD = (v, n, extra) => `<td ${n?'class="n"':''} style="color:#111;${extra||''}">${v}</td>`;
 async function saveDoc(title, inner, filename){
   const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
-  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{margin:18px;font-family:Tahoma,Arial,sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:right}td.n,th.n{text-align:left;direction:ltr}@media print{body{margin:8mm}}</style></head><body>${inner}<p style="font-size:11px;color:#777">اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p><script>(${alignHeads.toString()})(document)<\/script></body></html>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{margin:18px;font-family:Tahoma,Arial,sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:right}td.n,th.n{text-align:left;direction:ltr}@media print{body{margin:8mm}}</style></head><body>${inner}<p style="font-size:11px;color:#777">اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p><script>(${alignHeads.toString()})(document);(${enhanceTables.toString()})(document)<\/script></body></html>`;
   try { await dl.save({filename, data:html}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
 }
 const vanSelect = (id, sel) => `<select id="${id}" aria-label="السيارة"><option value="0">كل السيارات</option>${vanNos().map(v=>`<option value="${v}" ${sel==v?'selected':''}>${esc(vanName(v))}</option>`).join('')}</select>`;
@@ -1611,6 +1655,7 @@ function receiptCard(rc){
     <table class="mini"><tbody>${lines.map(p=>`<tr class="${p.deleted?'gone':''}"><td>${esc(p.item)}${num(p.price)===0?' <span class="pill good">مجاني</span>':''}</td><td class="n">${kg(p.qty)}</td><td class="n">${fmt(p.price,3)}</td><td class="n">${jd(p.total)}</td></tr>`).join('')}
     <tr class="total"><td>الاجمالي</td><td class="n">${kg(sum(live,'qty'))}</td><td></td><td class="n">${jd(sum(live,'total'))}</td></tr></tbody></table>
     <div style="margin-top:8px">${rc.source==='excel_import'&&!rc.has_photo?'<span class="muted" style="font-size:.78rem">من الإكسل — بلا صورة</span>':photoCell('purchase', rc.batch, rc.has_photo, rc.company+' · '+jd(sum(live,'total')), state.day, rc.van_no)}</div>
+    ${D.closed?'':`<div class="controls rc-acts" style="margin-top:8px;justify-content:flex-end">${live.length?delBatchBtn(rc.batch, rc.company, sum(live,'total')):lines.length?resBatchBtn(rc.batch):''}</div>`}
   </div>`;
 }
 function viewPurchases(){
@@ -1788,12 +1833,14 @@ function salesHtml(X, Q){
     <div><div class="sec-head"><h3>الفواتير (${num(X.count)})</h3>${rows.length?copyBtn('tSalesList'):''}</div>
     ${rows.length?`<div class="tablebox"><table id="tSalesList"><thead><tr><th>التاريخ</th><th>الرقم</th><th>السيارة</th><th>العميل</th><th>النوع</th><th class="n">كغم</th><th class="n">المبلغ</th><th class="n">الكلفة</th><th class="n">الربح</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td>${esc(dmy(r.day))}</td><td><button type="button" class="icon-btn" data-sreceipt="${r.id}" title="عرض الإيصال">${esc(r.number||'بدون رقم')} 🧾</button>${r.has_photo?' <span class="pill good">📷</span>':''}${r.edited_by_office?' <span class="pill warn">عُدّل</span>':''}</td><td class="keep">${vanPill(r.van_no)}</td><td>${esc(r.customer_name)}</td><td><span class="pill ${r.receipt_type==='نقدي'?'good':'warn'}">${esc(r.receipt_type)}</span></td><td class="n">${kg(r.kg)}</td><td class="n">${jd(r.total)}</td><td class="n">${num(r.nocost)?'<span class="pill bad">لا كلفة</span>':jd(r.cost)}</td><td class="n${ncls(r.profit)}">${jd(r.total-r.cost)}</td></tr>`).join('')}
-      <tr class="total"><td colspan="5">الاجمالي</td><td class="n">${kg(X.kg)}</td><td class="n">${jd(X.total)}</td><td class="n">${jd(X.cost)}</td><td class="n${ncls(X.profit)}">${jd(X.profit)}</td></tr></tbody></table></div>`
+      <tr class="total"><td colspan="5">الاجمالي · متوسط سعر الكيلو ${fmt(num(X.kg)?X.total/X.kg:null,3)} · متوسط كلفة الكيلو ${fmt(num(X.kg)?X.cost/X.kg:null,3)}</td><td class="n">${kg(X.kg)}</td><td class="n">${jd(X.total)}</td><td class="n">${jd(X.cost)}</td><td class="n${ncls(X.profit)}">${jd(X.profit)}</td></tr></tbody></table></div>`
       :'<div class="panel empty">لا فواتير في هذه الفترة.</div>'}</div>
-    ${(X.by_day||[]).length>1?`<div><div class="sec-head"><h3>حسب اليوم</h3>${copyBtn('tSalesDays')}</div><div class="tablebox"><table id="tSalesDays"><thead><tr><th>اليوم</th><th class="n">فواتير</th><th class="n">كغم</th><th class="n">المبيعات</th><th class="n">الربح</th></tr></thead><tbody>
-      ${X.by_day.map(d=>`<tr><td>${esc(dayName(d.day))}</td><td class="n">${num(d.n)}</td><td class="n">${kg(d.kg)}</td><td class="n">${jd(d.total)}</td><td class="n${ncls(d.profit)}">${jd(d.profit)}</td></tr>`).join('')}</tbody></table></div></div>`:''}
-    ${(X.by_van||[]).length>1?`<div><div class="sec-head"><h3>حسب السيارة</h3></div><div class="tablebox"><table><thead><tr><th>السيارة</th><th class="n">فواتير</th><th class="n">كغم</th><th class="n">المبيعات</th><th class="n">الربح</th></tr></thead><tbody>
-      ${X.by_van.map(d=>`<tr><td>${vanPill(d.van_no)}</td><td class="n">${num(d.n)}</td><td class="n">${kg(d.kg)}</td><td class="n">${jd(d.total)}</td><td class="n${ncls(d.profit)}">${jd(d.profit)}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+    ${(X.by_day||[]).length>1?`<div><div class="sec-head"><h3>حسب اليوم</h3>${copyBtn('tSalesDays')}</div><div class="tablebox"><table id="tSalesDays"><thead><tr><th>اليوم</th><th class="n">فواتير</th><th class="n">كغم</th><th class="n">المبيعات</th><th class="n">متوسط سعر الكيلو</th><th class="n">الربح</th></tr></thead><tbody>
+      ${X.by_day.map(d=>`<tr><td>${esc(dayName(d.day))}</td><td class="n">${num(d.n)}</td><td class="n">${kg(d.kg)}</td><td class="n">${jd(d.total)}</td><td class="n">${fmt(num(d.kg)?d.total/d.kg:null,3)}</td><td class="n${ncls(d.profit)}">${jd(d.profit)}</td></tr>`).join('')}
+      <tr class="total"><td>الاجمالي / المتوسط</td><td class="n">${sum(X.by_day,'n')}</td><td class="n">${kg(sum(X.by_day,'kg'))}</td><td class="n">${jd(sum(X.by_day,'total'))}</td><td class="n">${fmt(ratio(X.by_day,'total','kg'),3)}</td><td class="n${ncls(sum(X.by_day,'profit'))}">${jd(sum(X.by_day,'profit'))}</td></tr></tbody></table></div></div>`:''}
+    ${(X.by_van||[]).length>1?`<div><div class="sec-head"><h3>حسب السيارة</h3></div><div class="tablebox"><table><thead><tr><th>السيارة</th><th class="n">فواتير</th><th class="n">كغم</th><th class="n">المبيعات</th><th class="n">متوسط سعر الكيلو</th><th class="n">الربح</th></tr></thead><tbody>
+      ${X.by_van.map(d=>`<tr><td>${vanPill(d.van_no)}</td><td class="n">${num(d.n)}</td><td class="n">${kg(d.kg)}</td><td class="n">${jd(d.total)}</td><td class="n">${fmt(num(d.kg)?d.total/d.kg:null,3)}</td><td class="n${ncls(d.profit)}">${jd(d.profit)}</td></tr>`).join('')}
+      <tr class="total"><td>الاجمالي / المتوسط</td><td class="n">${sum(X.by_van,'n')}</td><td class="n">${kg(sum(X.by_van,'kg'))}</td><td class="n">${jd(sum(X.by_van,'total'))}</td><td class="n">${fmt(ratio(X.by_van,'total','kg'),3)}</td><td class="n${ncls(sum(X.by_van,'profit'))}">${jd(sum(X.by_van,'profit'))}</td></tr></tbody></table></div></div>`:''}
     ${renderTable(tradingTable(X.trading), 980, '')}`;
 }
 async function loadSales(){
@@ -1845,7 +1892,85 @@ function maintForm(){
     async fd => { await setMaint(true, fd.get('msg')||''); return ''; });
 }
 
-const VIEWS={today:viewToday,sheet:viewSheet,sales:viewSales,purchases:viewPurchases,pnl:viewPnl,bank:viewBank,expenses:viewExpenses,docs:viewDocs,reports:viewReports,debts:viewDebts,vans:viewVans,transfers:viewTransfers,cheques:viewCheques,items:viewItems,control:viewControl};
+// ================================================================ المخزون (stock page)
+// Company stock for a period: opening, purchases, transfers in/out with branches, sold, closing —
+// in kilos and in money — per item, per company and per van. Costs are the company's average cost.
+function stockRows(X){
+  const tv = {};
+  (X.transfers||[]).forEach(t => { const r = tv[t.item] || (tv[t.item] = {in_qty:0,in_val:0,out_qty:0,out_val:0});
+    if (t.from_kind==='branch' && t.to_kind!=='branch') { r.in_qty += num(t.qty)||0; r.in_val += num(t.total_cost)||0; }
+    else if (t.to_kind==='branch' && t.from_kind!=='branch') { r.out_qty += num(t.qty)||0; r.out_val += num(t.total_cost)||0; } });
+  return (X.item_movement||[]).map(m => { const t = tv[m.item] || {};
+    const opening_value = (num(m.opening_qty)||0) * (num(m.opening_cost)||0);
+    return {item:m.item, company:m.company, opening_qty:m.opening_qty, opening_value,
+      purchased:m.purchased, purchased_value:m.purchased_value, buy_price: num(m.purchased)?m.purchased_value/m.purchased:null,
+      transfer_in:m.transfer_in, in_value:t.in_val||0, transfer_out:m.transfer_out, out_value:t.out_val||0,
+      sold:m.sold, cogs:m.cogs, sold_value:m.sold_value, closing_qty:m.closing_qty, closing_cost:m.closing_cost, closing_value:m.closing_value}; })
+    .filter(r => [r.opening_qty,r.purchased,r.transfer_in,r.transfer_out,r.sold,r.closing_qty].some(v => Math.abs(num(v)||0) > 0.0005));
+}
+function viewStock(){
+  const Q = state.stk || (state.stk = {range:'this_month', from: rangeOf('this_month')[0], to: state.day});
+  const X = Q.data;
+  const head = `<div class="panel" style="display:flex;flex-direction:column;gap:12px">
+      <div class="sec-head" style="margin:0"><div><h2>المخزون</h2><p>حركة البضاعة في فترة بالكيلو وبالدينار: أول الفترة، المشتريات، الوارد من الفروع، الصادر للفروع، المباع، وآخر الفترة. الكلفة هي متوسط كلفة الشركة لكل صنف.</p></div></div>
+      <div class="controls" style="flex-wrap:wrap">${RANGES.map(([k,l])=>`<button type="button" class="btn ${Q.range===k?'':'sec'}" data-krange="${k}">${l}</button>`).join('')}</div>
+      <div class="controls" style="flex-wrap:wrap"><span class="toggle">من <input type="date" id="kFrom" value="${esc(Q.from)}"></span><span class="toggle">إلى <input type="date" id="kTo" value="${esc(Q.to)}"></span>
+        <button class="btn" type="button" data-act="loadStock">عرض</button>${Q.loading?'<span class="muted">جارٍ الحساب…</span>':''}</div></div>`;
+  if (!X) return `<section class="view">${head}<div class="panel empty">${Q.loading?'جارٍ الحساب…':'اختر الفترة ثم اضغط «عرض».'}</div></section>`;
+  const rows = stockRows(X);
+  const S = k => sum(rows, k);
+  const op = {q:S('opening_qty'), v:S('opening_value')}, pu = {q:S('purchased'), v:S('purchased_value')},
+        ti = {q:S('transfer_in'), v:S('in_value')}, to = {q:S('transfer_out'), v:S('out_value')},
+        so = {q:S('sold'), v:S('cogs')}, cl = {q:S('closing_qty'), v:S('closing_value')};
+  const reval = cl.v - (op.v + pu.v + ti.v - to.v - so.v);
+  const vs = X.van_stock || [];
+  const cdq = sum(vs,'count_diff'), cdv = sum(vs,'count_diff_value');
+  const neg = rows.filter(r => num(r.closing_qty) < -0.05);
+  const tile = (l, v, sub, cls) => `<div class="kpi"><div class="label">${l}</div><div class="value${cls||''}">${v}</div><div class="sub">${sub}</div></div>`;
+  const q = v => kg(v)+' كغم';
+  const flow = (lab, a, s) => `<tr><td>${lab}</td><td class="n">${s||''}${kg(a.q)}</td><td class="n">${s||''}${jd(a.v)}</td><td class="n">${num(a.q)?fmt(a.v/a.q,3):'—'}</td></tr>`;
+  const byComp = Object.values(rows.reduce((m,r)=>{ const c = m[r.company||'—'] || (m[r.company||'—'] = {company:r.company||'—', opening_qty:0, opening_value:0, purchased:0, purchased_value:0, transfer_in:0, in_value:0, transfer_out:0, out_value:0, sold:0, cogs:0, closing_qty:0, closing_value:0});
+    ['opening_qty','opening_value','purchased','purchased_value','transfer_in','in_value','transfer_out','out_value','sold','cogs','closing_qty','closing_value'].forEach(k=>c[k]+=num(r[k])||0); return m; }, {}));
+  const itemCols = [['item','الصنف','text'],['company','الشركة','text'],['opening_qty','أول الفترة كغم','kg'],['opening_value','أول الفترة د.ا','jd'],
+    ['purchased','مشتريات كغم','kg'],['purchased_value','مشتريات د.ا','jd'],['buy_price','سعر الشراء','n3'],
+    ['transfer_in','وارد كغم','kg'],['in_value','وارد د.ا','jd'],['transfer_out','صادر كغم','kg'],['out_value','صادر د.ا','jd'],
+    ['sold','المباع كغم','kg'],['cogs','كلفة المباع','jd'],['closing_qty','آخر الفترة كغم','kg'],['closing_cost','متوسط الكلفة','n4'],['closing_value','آخر الفترة د.ا','jd']];
+  const vanT = vanNos().map(v => T('مخزون '+vanName(v), [['item','الصنف','text'],['opening','أول الفترة','kg'],['purchases','مشتريات','kg'],['transfer_in','وارد','kg'],['transfer_out','صادر','kg'],['sold','مبيعات','kg'],['book_end','الدفتري آخر الفترة','kg'],['counts','أيام الجرد','int'],['count_diff','فرق الجرد (+ نقص)','kg'],['count_diff_value','قيمة الفرق','jd']],
+      vs.filter(r=>r.van_no==v), {total:true, totalSkip:['counts']}));
+  return `<section class="view">${head}
+    <div class="kpis four panel">
+      ${tile('مخزون أول الفترة', jd(op.v), q(op.q))}
+      ${tile('المشتريات', jd(pu.v), q(pu.q)+' · سعر '+fmt(num(pu.q)?pu.v/pu.q:null,3))}
+      ${tile('الوارد من الفروع', jd(ti.v), q(ti.q))}
+      ${tile('الصادر للفروع', jd(to.v), q(to.q))}
+      ${tile('صافي المشتريات بعد التحويلات', jd(pu.v+ti.v-to.v), q(pu.q+ti.q-to.q))}
+      ${tile('كلفة المباع', jd(so.v), q(so.q)+' · مبيعات '+jd(S('sold_value')))}
+      ${tile('مخزون آخر الفترة', jd(cl.v), q(cl.q), ncls(cl.v))}
+      ${tile('فرق الجرد', jd(cdv), (cdq>0?'نقص ':cdq<0?'زيادة ':'')+kg(Math.abs(cdq))+' كغم', cdv>0.005?' neg':'')}
+    </div>
+    ${neg.length?`<div class="banner bad">📦 أصناف بالسالب آخر الفترة (مبيع أكثر من المشترى — مشتريات لم تُدخل أو أُدخلت باسم صنف آخر): ${neg.map(r=>`<b>${esc(r.item)}</b> ${kg(r.closing_qty)} كغم`).join('، ')}</div>`:''}
+    <div class="grid2">
+      <div class="panel"><div class="sec-head" style="margin:0 0 8px"><h3>معادلة المخزون للفترة</h3></div>
+        <div class="tablebox"><table><thead><tr><th>البيان</th><th class="n">كغم</th><th class="n">د.ا</th><th class="n">للكيلو</th></tr></thead><tbody>
+          ${flow('مخزون أول الفترة', op)}${flow('+ المشتريات', pu)}${flow('+ الوارد من الفروع', ti)}${flow('− الصادر للفروع', to)}${flow('− كلفة المباع', so)}
+          ${Math.abs(reval)>=0.5?`<tr><td title="تغيّر متوسط الكلفة خلال الفترة ومخزون الأصناف السالبة">± فرق إعادة التقييم</td><td class="n"></td><td class="n${ncls(reval)}">${jd(reval)}</td><td></td></tr>`:''}
+          <tr class="total"><td>= مخزون آخر الفترة</td><td class="n${ncls(cl.q)}">${kg(cl.q)}</td><td class="n${ncls(cl.v)}">${jd(cl.v)}</td><td class="n">${num(cl.q)?fmt(cl.v/cl.q,3):'—'}</td></tr>
+        </tbody></table></div></div>
+      <div class="panel">${renderTable(T('حسب الشركة', [['company','الشركة','text'],['purchased','مشتريات كغم','kg'],['purchased_value','مشتريات د.ا','jd'],['transfer_out','صادر كغم','kg'],['out_value','صادر د.ا','jd'],['sold','المباع كغم','kg'],['cogs','كلفة المباع','jd'],['closing_qty','آخر الفترة كغم','kg'],['closing_value','آخر الفترة د.ا','jd']], byComp, {total:true}), 701, '')}</div>
+    </div>
+    ${renderTable(T('حسب الصنف', itemCols, rows, {total:true, ratio:{buy_price:['purchased_value','purchased'], closing_cost:['closing_value','closing_qty']}}), 702, '')}
+    <div class="grid2">${vanT.map((tb,i)=>`<div style="min-width:0">${renderTable(tb, 710+i, '')}</div>`).join('')}</div>
+    ${renderTable(T('التحويلات لكل فرع / مكان', [['name','المكان','text'],['qty_in','وارد منه كغم','kg'],['cost_in','قيمة الوارد','jd'],['qty_out','صادر إليه كغم','kg'],['cost_out','قيمة الصادر','jd']], X.transfers_by_place, {total:true}), 720, '')}
+  </section>`;
+}
+async function loadStock(){
+  const Q = state.stk; if ($('#kFrom')) { Q.from = $('#kFrom').value; Q.to = $('#kTo').value; }
+  Q.loading = true; render(); busy(true);
+  try { Q.data = await API.report(Q.from, Q.to, [], ['item_movement','van_stock','transfers'], {}); }
+  catch(e){ toast(cleanError(e)); } finally { Q.loading = false; busy(false); if (current()==='stock') render(); }
+}
+
+const VIEWS={today:viewToday,stock:viewStock,sheet:viewSheet,sales:viewSales,purchases:viewPurchases,pnl:viewPnl,bank:viewBank,expenses:viewExpenses,docs:viewDocs,reports:viewReports,debts:viewDebts,vans:viewVans,transfers:viewTransfers,cheques:viewCheques,items:viewItems,control:viewControl};
 function current(){ const h=location.hash.slice(1); const T=window.VTABS||[]; if (T.length) return (VIEWS[h]&&T.includes(h))?h:T[0]; return VIEWS[h]?h:'today'; }
 function alignHeads(root){
   (root||document).querySelectorAll('table').forEach(t=>{
@@ -1857,7 +1982,31 @@ function alignHeads(root){
       if(tot) h.classList.toggle('n', num*2>tot); });
   });
 }
-new MutationObserver(()=>{ if(alignHeads._q) return; alignHeads._q=requestAnimationFrame(()=>{ alignHeads._q=0; alignHeads(document); }); }).observe(document.body,{childList:true,subtree:true});
+// Long and wide tables: repeat the column names under the totals, keep the header and the
+// totals in view while scrolling a long table, and keep the first column in view when a
+// wide table scrolls sideways. Self-contained: also injected into the printable exports.
+function enhanceTables(root){
+  (root||document).querySelectorAll('table').forEach(t=>{
+    const head = t.tHead && t.tHead.rows[t.tHead.rows.length-1]; if (!head) return;
+    const body = [...t.tBodies].flatMap(b=>[...b.rows]);
+    const totals = body.filter(r=>r.classList.contains('total'));
+    if (totals.length && body.length - totals.length >= 5 && !t.querySelector('tr.foot-heads')) {
+      const tf = t.tFoot || t.createTFoot();
+      const fr = document.createElement('tr'); fr.className = 'foot-heads';
+      [...head.cells].forEach(h=>{ const c = document.createElement('th'); c.className = h.className; c.colSpan = h.colSpan; c.textContent = h.textContent; fr.appendChild(c); });
+      tf.appendChild(fr);
+    }
+    const box = t.parentElement && t.parentElement.classList.contains('tablebox') ? t.parentElement : null;
+    if (!box) return;
+    const tall = body.length > 18;
+    box.classList.toggle('tall', tall);
+    const last = body[body.length-1];
+    totals.forEach(r=>r.classList.toggle('stick', tall && r===last));
+    const fr = t.querySelector('tr.foot-heads'); if (fr) t.style.setProperty('--fh', fr.offsetHeight+'px');
+    box.classList.toggle('wide', box.scrollWidth > box.clientWidth + 4);
+  });
+}
+new MutationObserver(()=>{ if(alignHeads._q) return; alignHeads._q=requestAnimationFrame(()=>{ alignHeads._q=0; alignHeads(document); enhanceTables(document); }); }).observe(document.body,{childList:true,subtree:true});
 function render(){
   if (!D) return;
   const v=current();
@@ -1899,6 +2048,8 @@ main.addEventListener('click', async e=>{
   if (ds.act==='exportSetup') return exportSetup();
   if (ds.act==='salesXlsx') return salesExport('xlsx');
   if (ds.act==='salesHtml') return salesExport('html');
+  if (ds.krange) { const Q = state.stk; Q.range = ds.krange; const [f,to] = rangeOf(ds.krange); Q.from=f; Q.to=to; render(); return loadStock(); }
+  if (ds.act==='loadStock') return loadStock();
   if (ds.srange) { const Q = state.sales; Q.range = ds.srange; const [f,to] = rangeOf(ds.srange); Q.from=f; Q.to=to; render(); return loadSales(); }
   if (ds.svan !== undefined) { const Q = state.sales; const v = Number(ds.svan); if (v===0) Q.vans = []; else { Q.vans = Q.vans.includes(v) ? Q.vans.filter(x=>x!==v) : [...Q.vans, v]; if (Q.vans.length===vanNos().length) Q.vans=[]; } render(); return; }
   if (ds.stype !== undefined) { state.sales.type = ds.stype; render(); return; }
@@ -1986,7 +2137,15 @@ main.addEventListener('click', async e=>{
   if (ds.editcust) { e.stopPropagation(); return customerForm(custOf(ds.editcust)); }
   if (ds.edititem) return itemForm(find(D.items, ds.edititem));
   if (ds.count) return countForm(Number(ds.count));
+  if ((ds.del || ds.delbatch || ds.redit) && current()==='reports') state.afterSave = runReport;
   if (ds.del) return confirmDelete(ds.label, ds.del, ds.id);
+  if (ds.delbatch) return confirmDeleteBatch(ds.label, ds.delbatch);
+  if (ds.resbatch) { try { await sql(`select office_restore_purchase_receipt(${lit(ds.resbatch)}::uuid, ${lit(ACTOR)}) as n`); toast('استُرجعت الفاتورة'); load(); } catch(ex){ toast(cleanError(ex)); } return; }
+  if (ds.redit) { const id = ds.id; return openOnDay(ds.day, () => {
+      if (ds.redit==='col') { const c = find(D.collections, id); return c ? collectionForm(c) : toast('السند غير موجود'); }
+      if (ds.redit==='dep') { const d = find(D.deposits, id); return d ? depositForm({...d, day:state.day}) : toast('الإيداع غير موجود'); }
+      if (ds.redit==='pur') { const p = find(D.purchases, id); return p ? purchaseEdit(p) : toast('السطر غير موجود'); }
+    }); }
   if (ds.restore) return restoreRow(ds.restore, ds.id);
   if (ds.sv !== undefined) { state.sheetVan=Number(ds.sv); return render(); }
   if (ds.van && t.closest('.seg')) { state.van=Number(ds.van); state.cust=null; state.stmt=null; return render(); }
