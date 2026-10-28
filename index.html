@@ -56,11 +56,15 @@ section.view{display:flex;flex-direction:column;gap:22px}
 @media (max-width:820px){.grid2{grid-template-columns:minmax(0,1fr)}}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;min-width:0}
 .panel.van{border-top:3px solid var(--vc)}
+.panel.unsettled{border-color:var(--warn);background:var(--warn-soft)}
+.panel.unsettled table td{border-bottom-color:color-mix(in srgb,var(--warn) 25%,transparent)}
 .panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 16px}
 .kpis.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+.kpis.five{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:760px){.kpis.five{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:640px){.kpis.four{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:460px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:460px){.kpis,.kpis.five{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .kpi .value{overflow-wrap:anywhere}
 .kpi .label{font-size:.78rem;color:var(--muted);letter-spacing:.01em}
 .kpi .value{font-family:var(--display);font-size:1.3rem;font-weight:600;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
@@ -181,7 +185,7 @@ html.ro:not(.ed) [data-act=newExpense],html.ro:not(.ed) [data-act=newDeposit],ht
 html.ro:not(.ed) .add-on-day,html.ro:not(.ed) [data-editinv],html.ro:not(.ed) [data-editp],html.ro:not(.ed) [data-editcol],html.ro:not(.ed) [data-edittrf],
 html.ro:not(.ed) [data-editcust],html.ro:not(.ed) [data-edititem],html.ro:not(.ed) [data-editexp],html.ro:not(.ed) [data-editdep],html.ro:not(.ed) [data-upload],
 html.ro:not(.ed) [data-count],html.ro:not(.ed) .owner-only,html.ro:not(.ed) [data-ccolor],html.ro:not(.ed) [data-cren],html.ro:not(.ed) [data-etren],
-html.ro:not(.ed) #pvAdd{display:none!important}
+html.ro:not(.ed) #pvAdd,html.ro:not(.ed) [data-redit],html.ro:not(.ed) [data-act=cfSaveVal],html.ro:not(.ed) [data-act=cfClearVal],html.ro:not(.ed) #cfValV,html.ro:not(.ed) #cfValN{display:none!important}
 html.ro:not(.ed) select[data-kind],html.ro:not(.ed) select[data-cheque],html.ro select[data-set]{pointer-events:none;appearance:none;border-color:transparent;background:none}
 #tabs a.can-edit::after{content:' ✎';font-size:.8em;opacity:.7}
 #login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
@@ -218,11 +222,13 @@ html.ro:not(.ed) select[data-kind],html.ro:not(.ed) select[data-cheque],html.ro 
     <a href="#docs">الصور والمستندات</a>
     <a href="#reports">التقارير</a>
     <a href="#pnl">الأرباح والخسائر</a>
+    <a href="#cashflow">التدفق النقدي</a>
     <a href="#debts">العملاء والذمم</a>
     <a href="#vans">السيارات</a>
     <a href="#transfers">التحويلات والكلفة</a>
     <a href="#cheques">الشيكات</a>
     <a href="#items">الأصناف</a>
+    <a href="#search">🔍 بحث</a>
   </nav>
   <main id="main"><div class="panel empty">جارٍ الاتصال بقاعدة البيانات…</div></main>
 </div>
@@ -348,6 +354,9 @@ let API = {
   compStmt: (c, f, t, vs) => sqlJson(`company_statement(${lit(c)}, ${lit(f)}::date, ${lit(t)}::date, ${vansArr(vs)})`),
   pnl: (f, t, vs) => sqlJson(`profit_loss(${lit(f)}::date, ${lit(t)}::date, ${vansArr(vs)})`),
   sales: (f, t, vs, ty, cu) => sqlJson(`sales_list(${lit(f)}::date, ${lit(t)}::date, ${vansArr(vs)}, ${ty?lit(ty):'null'}, ${cu?Number(cu):'null'})`),
+  cashflow: (f, t, vs) => sqlJson(`cashflow(${lit(f)}::date, ${lit(t)}::date, ${vansArr(vs)})`),
+  valuations: () => sqlJson('valuations_list()'),
+  search: (q, f, t, ks, vs) => sqlJson(`search_docs(${lit(q)}, ${lit(f)}::date, ${lit(t)}::date, array[${ks.map(x=>lit(x)).join(',')}]::text[], ${vansArr(vs)})`),
   trading: (f, t, vs) => sqlJson(`trading_summary(${lit(f)}::date, ${lit(t)}::date, ${vansArr(vs)})`),
 };
 function connectionMessage(e){
@@ -559,13 +568,13 @@ function collectionForm(c){
   openModal(`<h2>${edit?'تعديل سند':'سند قبض جديد'}</h2>
     <div class="form-grid">
       <div class="field"><label for="f_van">السيارة</label><select id="f_van" name="van">${vanNos().map(v=>`<option value="${v}" ${v==van?'selected':''}>${vanName(v)}</option>`).join('')}</select></div>
-      <div class="field"><label for="f_day">التاريخ</label><input id="f_day" type="date" name="day" value="${esc(state.day)}"></div>
+      <div class="field"><label for="f_day">التاريخ</label><input id="f_day" type="date" name="day" value="${esc(c&&c.day?String(c.day).slice(0,10):state.day)}"></div>
       <div class="field"><label for="f_cust">العميل</label><select id="f_cust" name="customer">${custOptions(van, c&&c.customer_id)}</select></div>
       <div class="field"><label for="f_amt">المبلغ (د.ا)</label><input id="f_amt" name="amount" inputmode="decimal" value="${c?num(c.amount):''}"></div>
       <div class="field"><label for="f_m">نوع التسديد</label><select id="f_m" name="method">${opts(METHODS, c?c.method:'تسديد ذمم سابقة')}</select></div>
       <div class="field"><label for="f_inv">عن فاتورة (اختياري)</label><input id="f_inv" name="invoice" value="${esc(c&&c.invoice_number||'')}" placeholder="v1-191"></div>
-      <div class="field chq"><label for="f_cno">رقم الشيك</label><input id="f_cno" name="cheque_no"></div>
-      <div class="field chq"><label for="f_due">تاريخ الاستحقاق</label><input id="f_due" type="date" name="due_on"></div>
+      <div class="field chq"><label for="f_cno">رقم الشيك</label><input id="f_cno" name="cheque_no" value="${esc(c&&c.cheque_no||'')}"></div>
+      <div class="field chq"><label for="f_due">تاريخ الاستحقاق</label><input id="f_due" type="date" name="due_on" value="${esc(c&&c.due_on?String(c.due_on).slice(0,10):'')}"></div>
     </div>
     ${edit?'<div class="field"><label for="f_reason">سبب التعديل (مطلوب)</label><input id="f_reason" name="reason"></div>':''}`,
     async fd => {
@@ -1086,6 +1095,29 @@ function vanPanel(v){
     </div></div>`;
 }
 
+// ================================================================ غير مسوّى (unsettled)
+// Figures the database cannot settle yet, shown apart from the settled ones on every page that shows profit or stock:
+//  nocost      sales of items that were never bought (no cost) → the shown profit is too high by their estimated cost
+//  negative    items below zero over the chosen vans → purchases not entered, estimated value
+//  van_negative a van below zero while the item exists in another van → a transfer between vans was not recorded
+function unsettledPanel(u, o={}){
+  if (!u) return '';
+  if (!u.any) return o.ok ? `<div class="panel" style="border-color:var(--good);padding:10px 14px;font-size:.88rem">✓ لا يوجد شيء غير مسوّى في هذه الفترة — كل المبيعات لها كلفة ولا أصناف بالسالب.</div>` : '';
+  const nc = u.nocost||{}, ng = u.negative||{}, vn = u.van_negative||{};
+  const po = num(u.profit_overstated)||0, sm = num(ng.est_value)||0;
+  const chips = (rows, f) => (rows||[]).slice(0,12).map(r=>`<span class="pill warn" title="تقدير الكلفة ${fmt(r.est_cost,3)} د.ا/كغم">${esc(r.item)}${f(r)}</span>`).join(' ') + ((rows||[]).length>12?` <span class="muted">+${rows.length-12}</span>`:'');
+  const row = (k, v, sub, cls) => `<tr><td style="white-space:normal">${k}${sub?`<div class="muted" style="font-size:.78rem;margin-top:2px">${sub}</div>`:''}</td><td class="n${cls||''}" style="vertical-align:top"><b>${v}</b></td></tr>`;
+  return `<div class="panel unsettled">
+    <div class="sec-head" style="margin-bottom:6px"><div><h3>⏳ غير مسوّى</h3><p>أرقام لا يستطيع النظام تسويتها بعد، معروضة وحدها حتى لا تختلط بالأرقام المؤكدة. التقدير بمتوسط كلفة شركة الصنف${u.as_of?` كما في ${dmy(u.as_of)}`:''}.</p></div></div>
+    <div class="tablebox" style="background:transparent"><table style="font-size:.86rem"><tbody>
+      ${num(nc.lines)?row('مبيعات أصناف بلا كلفة (لم تُشترَ أبداً)', jd(nc.sales)+' د.ا', `${kg(nc.kg)} كغم في ${num(nc.lines)} سطر · كلفتها التقديرية <b>${jd(nc.est_cogs)}</b> — الربح المعروض أعلى من الحقيقي بهذا المقدار<br>${chips(nc.items, r=>' '+kg(r.kg)+' كغم · '+jd(r.sales)+' د.ا')}`):''}
+      ${num(ng.items)?row('أصناف بالسالب — مشتريات لم تُدخل', jd(sm)+' د.ا', `${num(ng.items)} صنف · ${kg(-num(ng.kg))} كغم ناقصة · القيمة تقدير لما لم يُدخل من مشتريات<br>${chips(ng.rows, r=>' '+kg(r.qty))}`):''}
+      ${num(vn.items)?row('سيارة بالسالب والصنف موجود في سيارة أخرى — تحويل بين السيارات لم يُسجَّل', jd(num(vn.est_value)||0)+' د.ا', `${num(vn.items)} صنف · ${kg(-num(vn.kg))} كغم · لا يغيّر مخزون الشركة ولا الربح، لكنه يُفسد مخزون كل سيارة وجردها<br>${chips(vn.rows, r=>' '+vanName(r.van_no)+' '+kg(r.qty))}`):''}
+      ${o.profit!==undefined && po ? row('الربح بعد التسوية التقديرية', jd((num(o.profit)||0)-po)+' د.ا', `${o.profitLabel||'الربح المعروض'} ${jd(o.profit)} − كلفة تقديرية ${jd(po)}`, (num(o.profit)||0)-po<0?' neg':'') : ''}
+    </tbody></table></div>
+    <div class="muted" style="font-size:.8rem;margin-top:6px">للتسوية: أدخل مشتريات هذه الأصناف بتاريخها (أو حوّلها من الصنف الذي اشتُريت باسمه)، وسجّل التحويلات بين السيارات. تختفي هذه اللوحة تلقائياً عندما تصح الأرقام.</div>
+  </div>`;
+}
 function todayReminders(){
   const mp = D.missing_photos || {}, nMiss = (num(mp.purchase)||0)+(num(mp.expense)||0)+(num(mp.deposit)||0);
   const und = (D.bank||[]).filter(b=>num(b.undeposited)>0.005);
@@ -1104,6 +1136,7 @@ function viewToday(){
   return `<section class="view">
     <div class="sec-head"><div><h2>${esc(dayName(state.day))}</h2></div><div class="controls"><button class="btn" type="button" data-act="newInvoice">+ فاتورة</button><button class="btn sec" type="button" data-act="newPurchase">+ مشتريات</button><button class="btn sec" type="button" data-act="newCollection">+ سند قبض</button><button class="btn sec" type="button" data-act="newTransfer">+ تحويل</button><button class="btn sec" type="button" data-act="newExpense">+ مصروف</button><button class="btn sec" type="button" data-act="newDeposit">+ إيداع</button></div></div>
     ${todayReminders()}
+    ${unsettledPanel(D.unsettled, {profit: t.profit, profitLabel:'ربح اليوم المعروض'})}
     <div class="grid2">${vanNos().map(vanPanel).join('')}</div>
     <div class="grid2">
       <div>
@@ -1195,9 +1228,9 @@ function viewSheet(){
 
     <div>
       <div class="sec-head"><h3>التسديدات</h3><span class="controls">${col.length?copyBtn('tCol'):''}${closed?'':'<button class="btn" type="button" data-act="newCollection">+ سند قبض</button>'}</span></div>
-      ${col.length?`<div class="tablebox"><table id="tCol"><thead><tr><th>السيارة</th><th>رقم السند</th><th>العميل</th><th>نوع التسديد</th><th>عن فاتورة</th><th class="n">المبلغ</th><th class="noexp"></th></tr></thead><tbody>
-      ${col.map(r=>`<tr class="${r.deleted?'gone':''}"><td class="keep">${vanPill(r.van_no)}</td><td>${esc(r.number||'—')}</td><td>${esc(r.customer_name)}</td><td>${esc(r.method)}</td><td>${esc(r.invoice_number||'')}</td><td class="n">${jd(r.amount)}</td><td class="noexp keep">${closed?'':r.deleted?resBtn('collections',r.id):`<span class="actions"><button type="button" class="icon-btn" data-editcol="${r.id}">تعديل</button>${delBtn('collections',r.id,'حذف سند '+(r.number||'')+' — '+r.customer_name+' '+jd(r.amount))}</span>`}</td></tr>`).join('')}
-      <tr class="total"><td colspan="5">الاجمالي</td><td class="n">${jd(sum(col.filter(c=>!c.deleted),'amount'))}</td><td class="noexp"></td></tr></tbody></table></div>`:`<div class="panel empty">لا تسديدات في هذا اليوم.</div>`}
+      ${col.length?`<div class="tablebox"><table id="tCol"><thead><tr><th>السيارة</th><th>رقم السند</th><th>العميل</th><th>نوع التسديد</th><th>رقم الشيك</th><th>عن فاتورة</th><th class="n">المبلغ</th><th class="noexp"></th></tr></thead><tbody>
+      ${col.map(r=>`<tr class="${r.deleted?'gone':''}"><td class="keep">${vanPill(r.van_no)}</td><td>${esc(r.number||'—')}</td><td>${esc(r.customer_name)}</td><td>${esc(r.method)}</td><td class="n">${esc(r.cheque_no||'')}</td><td>${esc(r.invoice_number||'')}</td><td class="n">${jd(r.amount)}</td><td class="noexp keep">${closed?'':r.deleted?resBtn('collections',r.id):`<span class="actions"><button type="button" class="icon-btn" data-editcol="${r.id}">تعديل</button>${delBtn('collections',r.id,'حذف سند '+(r.number||'')+' — '+r.customer_name+' '+jd(r.amount))}</span>`}</td></tr>`).join('')}
+      <tr class="total"><td colspan="6">الاجمالي</td><td class="n">${jd(sum(col.filter(c=>!c.deleted),'amount'))}</td><td class="noexp"></td></tr></tbody></table></div>`:`<div class="panel empty">لا تسديدات في هذا اليوم.</div>`}
     </div>
 
     <div class="grid2">
@@ -1299,6 +1332,7 @@ function tablesFor(id, X){
         ['عدد الفواتير', s.invoices, 'int'], ['عدد العملاء', s.customers, 'int'], ['متوسط سعر الكيلو', num(s.kg)?s.sales/s.kg:null, 'n3'],
         ['كلفة المبيعات', s.cost], ['الربح قبل المصاريف', s.profit], ['هامش الربح', num(s.sales)?s.profit/s.sales:null, 'pct'],
         ['المصاريف', s.expenses], ['صافي الربح', (num(s.profit)||0)-(num(s.expenses)||0)],
+        ...(s.unsettled && s.unsettled.any ? [['⏳ غير مسوّى: كلفة تقديرية لمبيعات بلا كلفة', -(num(s.unsettled.profit_overstated)||0)], ['صافي الربح بعد التسوية التقديرية', (num(s.profit)||0)-(num(s.expenses)||0)-(num(s.unsettled.profit_overstated)||0)], ['⏳ غير مسوّى: مشتريات لم تُدخل (أصناف بالسالب، تقدير)', num((s.unsettled.negative||{}).est_value)||0]] : []),
         ['التحصيل', s.collected], ...Object.entries(m).map(([k,v])=>['   '+k, v]),
         ['المشتريات (كغم)', s.purchases_kg, 'kg'], ['المشتريات (قيمة)', s.purchases_value], ['الإيداعات البنكية', s.deposits], ['   منها نقدي', s.deposits_cash], ['   منها شيكات', s.deposits_cheque], ['غير مودع آخر الفترة', s.undeposited_close],
         ['الذمم أول الفترة', s.receivables_open], ['الذمم آخر الفترة', s.receivables_close], ['شيكات غير محصلة', s.cheques_pending],
@@ -1320,8 +1354,8 @@ function tablesFor(id, X){
         return [T('سجل الفواتير (بالأصناف)', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','الفاتورة','text'],['customer_name','العميل','text'],['receipt_type','النوع','text'],['item','الصنف','text'],['qty','الكمية','kg'],['price','السعر','n3'],['total','الاجمالي','jd'],['cost','الكلفة','jd']], rows, {total:true, ratio:{price:['total','qty']}})];
       }
       return [T('سجل الفواتير', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','الفاتورة','text'],['customer_name','العميل','text'],['receipt_type','النوع','text'],['kg','الكمية','kg'],['total','المبلغ','jd'],['cost','الكلفة','jd'],['profit','الربح','jd']], (X.invoices||[]).map(r=>({...r, number: r.number + (r.edited?' (معدّلة)':'')})), {total:true})]; }
-    case 'collections': return [T('سجل التسديدات', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','السند','text'],['customer_name','العميل','text'],['method','النوع','text'],['invoice_number','عن فاتورة','text'],['amount','المبلغ','jd']], X.collections, {total:true, act: r => r.id ? repActs('col', r.id, r.day, 'collections', 'حذف سند '+(r.number||'')+' — '+(r.customer_name||'')+' '+jd(r.amount)) : ''})];
-    case 'balances': return [T('الذمم وأعمارها', [['number','#','int'],['name','العميل','text'],['van_no','السيارة','van'],['opening','أول الفترة','jd'],['sales','المبيعات','jd'],['paid','التسديدات','jd'],['closing','آخر الفترة','jd'],['cheques_pending','شيكات','jd'],['total_due','المجموع','jd'],['credit_limit','السقف','jd'],['over_limit','فوق السقف','jd'],['age_0_7','0–7 أيام','jd'],['age_8_15','8–15','jd'],['age_16_30','16–30','jd'],['age_31_60','31–60','jd'],['age_60p','+60','jd'],['last_payment','آخر دفعة','date']], X.balances, {total:true, totalSkip:['number','credit_limit','over_limit']})];
+    case 'collections': return [T('سجل التسديدات', [['day','التاريخ','date'],['van_no','السيارة','van'],['number','السند','text'],['customer_name','العميل','text'],['method','النوع','text'],['cheque_no','رقم الشيك','text'],['due_on','استحقاق الشيك','date'],['invoice_number','عن فاتورة','text'],['amount','المبلغ','jd']], X.collections, {total:true, act: r => r.id ? repActs('col', r.id, r.day, 'collections', 'حذف سند '+(r.number||'')+' — '+(r.customer_name||'')+' '+jd(r.amount)) : ''})];
+    case 'balances': return [T('الذمم وأعمارها', [['number','#','int'],['name','العميل','text'],['van_no','السيارة','van'],['opening','أول الفترة','jd'],['sales','المبيعات','jd'],['paid','التسديدات','jd'],['closing','آخر الفترة (بعد تحصيل الشيكات)','jd'],['cheques_pending','شيكات غير محصلة','jd'],['total_due','المجموع (قبل تحصيل الشيكات)','jd'],['credit_limit','السقف','jd'],['over_limit','فوق السقف','jd'],['age_0_7','0–7 أيام','jd'],['age_8_15','8–15','jd'],['age_16_30','16–30','jd'],['age_31_60','31–60','jd'],['age_60p','+60','jd'],['last_payment','آخر دفعة','date']], X.balances, {total:true, totalSkip:['number','credit_limit','over_limit']})];
     case 'statements': return (X.statements||[]).map(s=>{ let run = num(s.opening)||0; const rows=[{day:'', kind:'رصيد أول الفترة', ref:'', debit:null, credit:null, bal:run}];
       (s.rows||[]).forEach(x=>{ run += (num(x.debit)||0)-(num(x.credit)||0); rows.push({day:x.day, kind:x.kind, ref:x.ref, debit:num(x.debit)||null, credit:num(x.credit)||null, bal:run}); });
       return T('كشف حساب: '+s.name+' · '+vn(s.van_no), [['day','التاريخ','date'],['kind','البيان','text'],['ref','المرجع','text'],['debit','مدين','jd'],['credit','دائن','jd'],['bal','الرصيد','jd']], rows); });
@@ -1391,7 +1425,7 @@ function summaryTiles(s){
   return `<div class="kpis four panel">
     ${tile('المبيعات', jd(s.sales), kg(s.kg)+' كغم · '+(s.invoices||0)+' فاتورة')}
     ${tile('الربح قبل المصاريف', jd(s.profit), 'هامش '+pct(num(s.sales)?s.profit/s.sales:null))}
-    ${tile('صافي الربح', jd((num(s.profit)||0)-(num(s.expenses)||0)), 'مصاريف '+jd(s.expenses))}
+    ${tile('صافي الربح', jd((num(s.profit)||0)-(num(s.expenses)||0)), 'مصاريف '+jd(s.expenses)+(s.unsettled&&num(s.unsettled.profit_overstated)?' · ⏳ بعد التسوية '+jd((num(s.profit)||0)-(num(s.expenses)||0)-num(s.unsettled.profit_overstated)):''))}
     ${tile('التحصيل', jd(s.collected), 'نسبة '+pct(num(s.sales)?s.collected/s.sales:null))}
     ${tile('المشتريات', jd(s.purchases_value), kg(s.purchases_kg)+' كغم')}
     ${tile('الذمم آخر الفترة', jd(s.receivables_close), 'أولها '+jd(s.receivables_open))}
@@ -1433,7 +1467,7 @@ function renderReport(){
   const t = reportTitle(); let i = 0;
   return `<div style="display:flex;flex-direction:column;gap:20px">
     <div class="panel"><h2>شركة خيرات العز للدواجن والمجمدات</h2><p class="muted" style="margin:4px 0 0">${esc(t.period)} · ${esc(t.vans)} · أُعدّ ${new Date(R.generated_at).toLocaleString('ar-JO-u-nu-latn',{day:'numeric',month:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</p></div>
-    ${rep.sections.includes('summary')?summaryTiles(R.summary):''}
+    ${rep.sections.includes('summary')?summaryTiles(R.summary)+unsettledPanel(R.summary&&R.summary.unsettled, {profit:(num(R.summary&&R.summary.profit)||0)-(num(R.summary&&R.summary.expenses)||0), profitLabel:'صافي الربح المعروض'}):''}
     ${SECTIONS.filter(s=>rep.sections.includes(s.id)).map(s=>`<section style="display:flex;flex-direction:column;gap:12px"><h2 style="border-bottom:1px solid var(--line);padding-bottom:6px">${esc(s.t)}</h2>${tablesFor(s.id,R).map(tb=>renderTable(tb, i++, s.t)).join('')}</section>`).join('')}
   </div>`;
 }
@@ -1489,13 +1523,14 @@ function viewDebts(){
   return `<section class="view">
     <div class="sec-head"><div><h2>العملاء والذمم حتى ${esc(dayName(state.day))}</h2><p>الرصيد من أول يوم في الدفاتر حتى التاريخ المختار. الدين موزّع حسب عمره: الأقدم يُسدَّد أولاً. كل سيارة ترى عملاءها فقط في التطبيق.</p></div>
       <div class="controls">${seg}<input type="search" id="custQ" placeholder="بحث باسم العميل" value="${esc(q)}" aria-label="بحث باسم العميل"><button class="btn" type="button" data-act="newCustomer">+ عميل</button></div></div>
-    <div class="kpis four panel">
-      <div class="kpi"><div class="label">مجموع الذمم</div><div class="value">${jd(sum(rows,'total_due'))}</div></div>
-      <div class="kpi"><div class="label">أكثر من 30 يوماً</div><div class="value">${jd(sum(rows,r=>(num(r.age_31_60)||0)+(num(r.age_60p)||0)))}</div></div>
+    <div class="kpis five panel">
+      <div class="kpi"><div class="label">مجموع الذمم قبل تحصيل الشيكات</div><div class="value">${jd(sum(rows,'total_due'))}</div><div class="sub">الشيكات ما زالت ديناً</div></div>
       <div class="kpi"><div class="label">شيكات غير محصلة</div><div class="value">${jd(sum(rows,'cheques_pending'))}</div></div>
+      <div class="kpi"><div class="label">مجموع الذمم بعد تحصيل الشيكات</div><div class="value">${jd(sum(rows,'closing'))}</div><div class="sub">إذا حُصّلت كل الشيكات</div></div>
+      <div class="kpi"><div class="label">أكثر من 30 يوماً</div><div class="value">${jd(sum(rows,r=>(num(r.age_31_60)||0)+(num(r.age_60p)||0)))}</div></div>
       <div class="kpi"><div class="label">فوق السقف</div><div class="value">${over.length}</div><div class="sub">عميل</div></div>
     </div>
-    ${rows.length?`<div class="tablebox"><table id="tDebt"><thead><tr><th class="n">#</th><th>العميل</th><th class="n">الرصيد</th><th class="n">شيكات</th><th class="n">المجموع</th><th class="n">0–7</th><th class="n">8–15</th><th class="n">16–30</th><th class="n">31–60</th><th class="n">+60</th><th class="n">السقف</th><th>الحالة</th><th>نوع العميل</th><th>آخر دفعة</th><th class="noexp"></th></tr></thead><tbody>
+    ${rows.length?`<div class="tablebox"><table id="tDebt"><thead><tr><th class="n">#</th><th>العميل</th><th class="n">بعد تحصيل الشيكات</th><th class="n">شيكات</th><th class="n">قبل تحصيل الشيكات</th><th class="n">0–7</th><th class="n">8–15</th><th class="n">16–30</th><th class="n">31–60</th><th class="n">+60</th><th class="n">السقف</th><th>الحالة</th><th>نوع العميل</th><th>آخر دفعة</th><th class="noexp"></th></tr></thead><tbody>
     ${rows.map(r=>`<tr class="click${state.cust==r.customer_id?' sel':''}${r.active===false?' gone':''}" data-cust="${r.customer_id}"><td class="n">${r.number}</td><td>${esc(r.name)}</td><td class="n${ncls(r.closing)}">${jd(r.closing)}</td><td class="n">${num(r.cheques_pending)?jd(r.cheques_pending):'—'}</td><td class="n"><b>${jd(r.total_due)}</b></td><td class="n">${num(r.age_0_7)?jd(r.age_0_7):''}</td><td class="n">${num(r.age_8_15)?jd(r.age_8_15):''}</td><td class="n">${num(r.age_16_30)?jd(r.age_16_30):''}</td><td class="n">${num(r.age_31_60)?`<span class="pill warn">${jd(r.age_31_60)}</span>`:''}</td><td class="n">${num(r.age_60p)?`<span class="pill bad">${jd(r.age_60p)}</span>`:''}</td><td class="n">${r.credit_limit===null?'—':jd(r.credit_limit)}</td><td class="keep">${num(r.over_limit)>0?`<span class="pill bad">فوق السقف ${jd(r.over_limit)}</span>`:(r.credit_limit===null?'':'<span class="pill good">ضمن السقف</span>')}</td><td class="keep"><select data-kind="${r.customer_id}" aria-label="نوع العميل" style="padding:2px 6px;font-size:.8rem">${opts(['ذمم','نقدي'], r.kind)}</select></td><td>${r.last_payment||'—'}</td><td class="noexp keep"><button type="button" class="icon-btn" data-editcust="${r.customer_id}">تعديل</button></td></tr>`).join('')}
     <tr class="total"><td></td><td>الاجمالي</td><td class="n">${jd(sum(rows,'closing'))}</td><td class="n">${jd(sum(rows,'cheques_pending'))}</td><td class="n">${jd(sum(rows,'total_due'))}</td><td class="n">${jd(sum(rows,'age_0_7'))}</td><td class="n">${jd(sum(rows,'age_8_15'))}</td><td class="n">${jd(sum(rows,'age_16_30'))}</td><td class="n">${jd(sum(rows,'age_31_60'))}</td><td class="n">${jd(sum(rows,'age_60p'))}</td><td></td><td></td><td></td><td></td><td class="noexp"></td></tr>
     </tbody></table></div>`:`<div class="panel empty">${!q?'لا يوجد عملاء لهذه السيارة بعد. أضفهم من زر «+ عميل» — يظهرون في تطبيق هذه السيارة فقط.':'لا نتائج.'}</div>`}
@@ -1532,12 +1567,33 @@ function viewVans(){
   </section>`;
 }
 
+// one table per branch and direction (صادر إلى / وارد من); a table only when it has lines
+function transferGroups(list){
+  const groups = {}, order = [];
+  (list||[]).forEach(t => {
+    let key, title;
+    if (t.to_kind==='branch' && t.from_kind!=='branch') { key = 'out|'+t.to_name; title = 'صادر إلى '+t.to_name; }
+    else if (t.from_kind==='branch' && t.to_kind!=='branch') { key = 'in|'+t.from_name; title = 'وارد من '+t.from_name; }
+    else { key = 'other'; title = 'تحويلات أخرى (بين السيارات أو الفروع)'; }
+    if (!groups[key]) { groups[key] = {title, rows:[]}; order.push(key); }
+    groups[key].rows.push(t);
+  });
+  const branchOf = k => k.split('|')[1] || '~';
+  order.sort((a,b) => branchOf(a).localeCompare(branchOf(b), 'ar') || (a.startsWith('out')?0:1) - (b.startsWith('out')?0:1));
+  return order.map((k,i) => { const g = groups[k];
+    const items = Object.entries(by(g.rows, r=>r.item)).map(([item, rs]) => ({item, qty:sum(rs,'qty'), total_cost:sum(rs,'total_cost'), n:rs.length}));
+    return `<div><div class="sec-head"><div><h3>${esc(g.title)}</h3><p>${g.rows.length} سطر · ${kg(sum(g.rows,'qty'))} كغم · ${jd(sum(g.rows,'total_cost'))} د.ا · متوسط الكيلو ${fmt(ratio(g.rows,'total_cost','qty'),4)}</p></div>${copyBtn('tTrfG'+i)}</div>
+      ${transferTable(g.rows, 'tTrfG'+i)}
+      ${items.length>1?`<div style="margin-top:8px"><div class="muted" style="font-size:.85rem;margin-bottom:4px">${esc(g.title)} — حسب الصنف</div><div class="tablebox"><table><thead><tr><th>الصنف</th><th class="n">أسطر</th><th class="n">الكمية</th><th class="n">متوسط الكيلو</th><th class="n">القيمة</th></tr></thead><tbody>
+        ${items.map(x=>`<tr><td>${esc(x.item)}</td><td class="n">${x.n}</td><td class="n">${kg(x.qty)}</td><td class="n">${fmt(x.qty?x.total_cost/x.qty:null,4)}</td><td class="n">${jd(x.total_cost)}</td></tr>`).join('')}
+        <tr class="total"><td>الاجمالي / المتوسط</td><td class="n">${g.rows.length}</td><td class="n">${kg(sum(items,'qty'))}</td><td class="n">${fmt(ratio(items,'total_cost','qty'),4)}</td><td class="n">${jd(sum(items,'total_cost'))}</td></tr></tbody></table></div></div>`:''}</div>`; }).join('');
+}
 function viewTransfers(){
   const tr = state.trf || {};
   return `<section class="view">
     <div class="sec-head"><div><h2>التحويلات والكلفة</h2><p>كل تحويل محفوظ في مكان واحد بكميته وكلفة الكيلو وقيمته. تطبيق الفروع لاحقاً يقرأ من هنا ما وصل لكل فرع وبأي كلفة.</p></div>
       <span class="controls"><span class="toggle">من <input type="date" id="tFrom" value="${esc(tr.from||rangeOf('this_month')[0])}"></span><span class="toggle">إلى <input type="date" id="tTo" value="${esc(tr.to||state.day)}"></span><button class="btn sec" type="button" data-act="loadTrf">عرض</button><button class="btn" type="button" data-act="newTransfer">+ تحويل</button></span></div>
-    ${tr.data?(tr.data.transfers.length?`<div class="kpis four panel">${(tr.data.transfers_by_place||[]).map(b=>`<div class="kpi"><div class="label">${esc(b.name)}</div><div class="value">${jd((num(b.cost_in)||0)-(num(b.cost_out)||0))}</div><div class="sub">وارد ${kg(b.qty_in)} · صادر ${kg(b.qty_out)} كغم</div></div>`).join('')}</div>${transferTable(tr.data.transfers,'tTrf')}`:'<div class="panel empty">لا تحويلات في هذه الفترة.</div>'):'<div class="panel empty">اختر الفترة ثم اضغط «عرض».</div>'}
+    ${tr.data?(tr.data.transfers.length?`<div class="kpis four panel">${(tr.data.transfers_by_place||[]).map(b=>`<div class="kpi"><div class="label">${esc(b.name)}</div><div class="value">${jd((num(b.cost_in)||0)-(num(b.cost_out)||0))}</div><div class="sub">وارد ${kg(b.qty_in)} · صادر ${kg(b.qty_out)} كغم</div></div>`).join('')}</div>${transferGroups(tr.data.transfers)}`:'<div class="panel empty">لا تحويلات في هذه الفترة.</div>'):'<div class="panel empty">اختر الفترة ثم اضغط «عرض».</div>'}
   </section>`;
 }
 
@@ -1562,7 +1618,7 @@ function viewItems(){
   </section>`;
 }
 
-const VIEWER_TABS=[['today','ملخص اليوم'],['sheet','ورقة اليوم'],['bank','الإيداع والبنك'],['sales','المبيعات'],['purchases','المشتريات'],['stock','المخزون'],['expenses','المصاريف'],['docs','الصور والمستندات'],['reports','التقارير'],['pnl','الأرباح والخسائر'],['debts','العملاء والذمم'],['vans','السيارات'],['transfers','التحويلات والكلفة'],['cheques','الشيكات'],['items','الأصناف']];
+const VIEWER_TABS=[['today','ملخص اليوم'],['sheet','ورقة اليوم'],['bank','الإيداع والبنك'],['sales','المبيعات'],['purchases','المشتريات'],['stock','المخزون'],['search','بحث'],['expenses','المصاريف'],['docs','الصور والمستندات'],['reports','التقارير'],['pnl','الأرباح والخسائر'],['cashflow','التدفق النقدي'],['debts','العملاء والذمم'],['vans','السيارات'],['transfers','التحويلات والكلفة'],['cheques','الشيكات'],['items','الأصناف']];
 const tabLabel=k=>{const x=VIEWER_TABS.find(t=>t[0]===k);return x?x[1]:k;};
 const tabLevel=(v,k)=>{ if(!v) return 'view'; if(v.edit_tabs&&v.edit_tabs.includes(k)) return 'edit'; return (!v.tabs||!v.tabs.length||v.tabs.includes(k))?'view':'none'; };
 const viewerPages=v=>{ const all=VIEWER_TABS.map(t=>t[0]), ed=v.edit_tabs||[], see=(v.tabs&&v.tabs.length)?v.tabs:all;
@@ -1589,8 +1645,33 @@ function viewerForm(v){
       return v ? 'عُدّل المدير' : 'أُضيف المدير';
     });
 }
+// Supabase free plan: the database may hold 500 MB. Photos are what grows; everything else is tiny.
+// Green under 60%, amber under 80%, red above — the owner then purges exported photos or subscribes.
+function usagePanel(u){
+  if (!u) return '<div class="panel empty">جارٍ قراءة حجم قاعدة البيانات…</div>';
+  if (!u.db_bytes) return '';
+  const MB = b => (b/1048576).toFixed(1);
+  const lim = u.limit_bytes || 524288000, pct = Math.min(100, u.db_bytes*100/lim);
+  const days = u.first_photo ? Math.max(1, Math.round((Date.now()-new Date(u.first_photo+'T00:00:00'))/86400000)) : 0;
+  const perDay = days ? u.photo_bytes_30d/Math.min(days,30) : 0;
+  const left = lim - u.db_bytes, months = perDay ? (left/perDay/30.4) : 0;
+  const level = pct>=80?'bad':pct>=60?'warn':'good';
+  const color = level==='bad'?'var(--bad)':level==='warn'?'#b7791f':'var(--good)';
+  const msg = level==='bad' ? 'قاعدة البيانات شبه ممتلئة — اشترك في خطة Pro ‏(25$ شهرياً) أو احذف نسخ الصور المرسلة إلى OneDrive.'
+            : level==='warn' ? 'اقتربت من الحد — خطّط للاشتراك أو لتنظيف الصور خلال الأشهر القادمة.'
+            : 'لا حاجة للاشتراك الآن.';
+  return `<div class="panel" style="border-color:${level==='good'?'var(--line)':color}">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div><b>حجم قاعدة البيانات (Supabase — الخطة المجانية)</b>
+        <p class="muted" style="margin:4px 0 0;font-size:.85rem">${MB(u.db_bytes)} MB من ${MB(lim)} MB (${pct.toFixed(1)}%) · الصور ${MB(u.photo_bytes)} MB لـ ${fmt(u.photos,0)} صورة${u.exported_photos!=null?` (${fmt(u.exported_photos,0)} منها منسوخة إلى OneDrive)`:''} · الفواتير ${fmt(u.invoices,0)}</p>
+        <p style="margin:6px 0 0;font-size:.88rem;color:${color}"><b>${msg}</b>${perDay?` بالوتيرة الحالية (${MB(perDay)} MB يومياً، معظمها صور) يبقى نحو <b>${months>=24?'أكثر من سنتين':Math.round(months)+' شهراً'}</b> قبل الامتلاء.`:''}</p></div>
+    </div>
+    <div style="height:10px;border-radius:6px;background:var(--line);margin-top:10px;overflow:hidden;direction:ltr"><div style="width:${pct.toFixed(1)}%;height:100%;background:${color};min-width:3px"></div></div>
+  </div>`;
+}
 function viewControl(){
   if (!state.viewers && !state.vwLoading) { state.vwLoading = true; sqlJson('viewers_list()').then(x=>{ state.viewers = x||[]; if (current()==='control') render(); }).catch(()=>{ state.viewers = []; }); }
+  if (!state.usage && !state.usLoading) { state.usLoading = true; sqlJson('db_usage()').then(x=>{ state.usage = (Array.isArray(x)?x[0]:x)||{}; if (current()==='control') render(); }).catch(()=>{ state.usage = {}; }); }
   const s=D.settings||[], keys=[...new Set([...s.map(x=>x.key), 'أحدث إصدار', 'رابط التحديث'])].filter(k=>k!=='وضع الصيانة' && k!=='رسالة الصيانة' && k!=='عدد الأيام المسموح الرجوع لها للمدراء');
   const val=(van,k)=>{const r=s.find(x=>(x.van_no??null)===van && x.key===k);return r?r.value:'';};
   const NUM_SET={'عدد الأيام المسموح الرجوع لها':{type:'number',min:0,max:60,hint:'أيام'},'وزن السلة':{type:'number',min:0,step:'0.01',hint:'كغم'},'رقم بداية الفاتورة':{type:'number',min:1,hint:''},'رقم واتساب الإدارة':{type:'text',hint:'9627…'},'أحدث إصدار':{type:'text',hint:'مثل 2.4',w:90},'رابط التحديث':{type:'text',hint:'https://…/cashvan-2.4.apk',w:260}};
@@ -1609,6 +1690,7 @@ function viewControl(){
     <p><b>عدد الأيام المسموح الرجوع لها</b>: رقم واحد يحكم كل ما يدخله السائق بتاريخ سابق — فواتير ومشتريات وتحويلات ومصاريف وإيداعات. قاعدة البيانات ترفض أي إدخال من التطبيق أقدم من هذا العدد. اللوحة (أنت) غير مقيّدة به.</p></div></div>
     ${keys.length?`<div class="tablebox"><div class="set-grid" style="grid-template-columns:minmax(0,2fr) repeat(${vs.length+1},minmax(90px,1fr))"><div class="hd">الإعداد</div><div class="hd">العام</div>${vs.map(v=>`<div class="hd">${esc(vanName(v))}</div>`).join('')}
       ${keys.map(k=>`<div>${esc(k)}</div><div>${choice(null,k)}</div>${vs.map(v=>`<div>${choice(v,k)}</div>`).join('')}`).join('')}</div></div>`:'<div class="panel empty">لا إعدادات.</div>'}
+    ${usagePanel(state.usage)}
     <div><div class="sec-head"><div><h2>حسابات المدراء</h2><p>كل مدير يدخل صفحة المدراء باسم دخول وكلمة مرور تحددها هنا. لكل صفحة تختار: لا يرى، يرى فقط، أو يرى ويعدّل (مثلاً المحاسب يضيف المشتريات والمصاريف). الحذف يبقى لك وحدك، وكل تعديل يُسجَّل باسمه. يمكن حصره بسيارة معيّنة أيضاً.</p></div><button class="btn" type="button" data-act="newViewer">+ مدير</button></div>
       <div class="controls" style="margin:-4px 0 10px"><span class="muted" style="font-size:.85rem">المدراء يضيفون ويعدّلون حتى</span><input class="setnum" type="number" min="0" max="365" inputmode="decimal" data-set="عدد الأيام المسموح الرجوع لها للمدراء" data-van="" value="${esc(val(null,'عدد الأيام المسموح الرجوع لها للمدراء'))}" placeholder="${esc(val(null,'عدد الأيام المسموح الرجوع لها')||'3')}" aria-label="أيام الرجوع للمدراء" style="width:70px;font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);direction:ltr;text-align:center"><span class="muted" style="font-size:.85rem">يوماً للخلف (فارغ = نفس رقم السائقين). أنت غير مقيّد.</span></div>
       ${state.viewers?(state.viewers.length?`<div class="tablebox"><table><thead><tr><th>الاسم</th><th>اسم الدخول</th><th>السيارات</th><th>الصفحات</th><th>الحالة</th><th>آخر دخول</th><th></th></tr></thead><tbody>${state.viewers.map(v=>`<tr class="${v.active?'':'gone'}"><td>${esc(v.name)}</td><td class="num">${esc(v.username)}</td><td>${v.vans&&v.vans.length?v.vans.map(vanName).join('، '):'كل السيارات'}</td><td style="font-size:.82rem;white-space:normal;min-width:220px">${viewerPages(v)}</td><td class="keep">${v.active?'<span class="pill good">فعّال</span>':'<span class="pill bad">موقوف</span>'}</td><td>${v.last_login?new Date(v.last_login).toLocaleString('ar-JO-u-nu-latn',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</td><td class="keep"><button type="button" class="icon-btn" data-editviewer="${v.id}">تعديل</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="panel empty">لا مدراء بعد.</div>'):'<div class="panel empty">جارٍ التحميل…</div>'}
@@ -1746,11 +1828,12 @@ function viewPnl(){
       <span class="controls"><span class="toggle">الشهر <input type="month" id="plMonth" value="${esc(Q.month||'')}"></span>
       <span class="toggle">من <input type="date" id="plFrom" value="${esc(Q.from)}"></span><span class="toggle">إلى <input type="date" id="plTo" value="${esc(Q.to)}"></span>${vanSelect('plVan', Q.van)}
       <button class="btn sec" type="button" data-act="loadPnl">عرض</button>${X?'<button class="btn" type="button" data-act="savePnl">تنزيل للطباعة</button>':''}</span></div>
-    ${X?pnlHtml(X):Q.err?`<div class="banner bad">${esc(Q.err)}</div>`:'<div class="panel empty">جارٍ الحساب…</div>'}
+    ${X?unsettledPanel(X.unsettled, {ok:true, profit:X.net, profitLabel:'صافي الربح المعروض'})+pnlHtml(X):Q.err?`<div class="banner bad">${esc(Q.err)}</div>`:'<div class="panel empty">جارٍ الحساب…</div>'}
   </section>`;
 }
 function pnlHtml(X){
   const s = X.sales||{}, sales = num(s.total)||0, gross = num(X.gross)||0, net = num(X.net)||0, sh = num(X.shortage)||0;
+  const U = X.unsettled||{}, po = num(U.profit_overstated)||0, ns = num(X.net_settled); const nci = (U.nocost||{}).items||[], ngr = (U.negative||{}).rows||[];
   const pc = v => sales ? ' <span style="color:#666;font-size:11px">('+(v/sales*100).toFixed(1)+'%)</span>' : '';
   const R = (label, val, opt={}) => `<tr style="${opt.bg?'background:'+opt.bg+';':''}"><td style="color:#111;${opt.b?'font-weight:700;':''}${opt.ind?'padding-right:22px;':''}">${label}</td><td class="n" style="color:${opt.c||'#111'};${opt.b?'font-weight:700;':''}">${val}</td></tr>`;
   const ms = X.months||[];
@@ -1762,19 +1845,23 @@ function pnlHtml(X){
       ${R('الكمية المباعة (كغم)', kg(s.kg), {ind:1})}
       ${R('ناقص: كلفة البضاعة المباعة', '− '+jd(X.cogs))}
       ${R('مجمل الربح'+pc(gross), jd(gross), {b:1, bg:'#eef2f0', c:gross<0?'#b4372f':'#111'})}
+      ${po?R('⏳ غير مسوّى: كلفة تقديرية لمبيعات أصناف بلا كلفة', '− '+jd(po), {ind:1, c:'#a86a12'})+R('مجمل الربح بعد التسوية التقديرية', jd(num(X.gross_settled)), {b:1, c:num(X.gross_settled)<0?'#b4372f':'#111'}):''}
       ${R(sh>=0?'ناقص: عجز الجرد الفعلي (بالكلفة)':'زائد: زيادة الجرد الفعلي (بالكلفة)', (sh>=0?'− ':'+ ')+jd(Math.abs(sh)))}
       <tr><td colspan="2" style="color:#111;font-weight:700;background:#f6f6f6">المصاريف</td></tr>
       ${(X.expenses||[]).length?(X.expenses||[]).map(e=>R(esc(e.cat)+` <span style="color:#666;font-size:11px">(${num(e.n)} · ${num(e.office)?'مكتب '+jd(e.office):''}${num(e.office)&&num(e.vans)?' · ':''}${num(e.vans)?'سيارات '+jd(e.vans):''})</span>`, '− '+jd(e.amount), {ind:1})).join(''):R('لا مصاريف مسجّلة في هذه الفترة', '0.00', {ind:1})}
       ${R('مجموع المصاريف', '− '+jd(X.expenses_total))}
       ${R('صافي '+(net<0?'الخسارة':'الربح')+pc(net), jd(net), {b:1, bg:net<0?'#f8e5e3':'#e3f1e8', c:net<0?'#b4372f':'#1d6b58'})}
+      ${po?R('⏳ غير مسوّى: كلفة تقديرية لمبيعات أصناف بلا كلفة', '− '+jd(po), {ind:1, c:'#a86a12'})+R('صافي الربح بعد التسوية التقديرية', jd(ns), {b:1, bg:ns<0?'#f8e5e3':'#fff3dc', c:ns<0?'#b4372f':'#111'}):''}
     </tbody></table>
     <div style="font-size:11px;color:#555;margin-top:8px;line-height:1.7">
-      ${num(s.lines_without_cost)?`⚠ ${s.lines_without_cost} سطر مبيعات بلا كلفة — لم تُحسب كلفتها.<br>`:''}
+      ${po?`⏳ غير مسوّى: ${num(s.lines_without_cost)} سطر مبيعات لأصناف بلا كلفة (${nci.map(r=>esc(r.item)+' '+kg(r.kg)+' كغم').join('، ')}) — كلفتها مقدّرة بمتوسط كلفة شركتها: ${jd(po)}. أدخل مشترياتها لتصبح الأرقام مؤكدة.<br>`:''}
+      ${ngr.length?`⏳ أصناف بالسالب في نهاية الفترة (مشتريات لم تُدخل): ${ngr.map(r=>esc(r.item)+' '+kg(r.qty)).join('، ')} — تقدير قيمتها ${jd((U.negative||{}).est_value)}.<br>`:''}
       ${X.office_included?'':'مصاريف المكتب لا تدخل عند اختيار سيارة واحدة.<br>'}
       التحويلات إلى الفروع بالكلفة (${jd(X.transfers_out_cost)}) ليست ربحاً ولا خسارة — بضاعة انتقلت بسعر كلفتها.
     </div>
     ${ms.length>1?`<div style="font-weight:700;margin:14px 0 6px">حسب الشهر</div><table style="font-size:12px"><thead><tr>${['الشهر','المبيعات','الكلفة','مجمل الربح','عجز الجرد','المصاريف','صافي الربح'].map(TH).join('')}</tr></thead><tbody>
       ${ms.map(m=>`<tr>${TD(esc(monthName(m.month)))}${TD(jd(m.sales),1)}${TD(jd(m.cogs),1)}${TD(jd(m.gross),1)}${TD(jd(m.shortage),1)}${TD(jd(m.expenses),1)}${TD('<b>'+jd(m.net)+'</b>',1,num(m.net)<0?'color:#b4372f':'')}</tr>`).join('')}</tbody></table>`:''}
+    ${po?`<div style="font-size:11px;color:#a86a12;margin-top:6px">⏳ المبلغ غير المسوّى (${jd(po)}) يخص الفترة كلها؛ لم يُوزَّع على الأشهر أو السيارات.</div>`:''}
     ${(X.by_van||[]).length>1?`<div style="font-weight:700;margin:14px 0 6px">حسب السيارة (قبل مصاريف المكتب وعجز الجرد)</div><table style="font-size:12px"><thead><tr>${['السيارة','المبيعات','الكلفة','مجمل الربح','مصاريف السيارة','الصافي'].map(TH).join('')}</tr></thead><tbody>
       ${X.by_van.map(v=>`<tr>${TD(esc(vanName(v.van_no)))}${TD(jd(v.sales),1)}${TD(jd(v.cogs),1)}${TD(jd(num(v.sales)-num(v.cogs)),1)}${TD(jd(v.expenses),1)}${TD('<b>'+jd(num(v.sales)-num(v.cogs)-num(v.expenses))+'</b>',1)}</tr>`).join('')}</tbody></table>`:''}
   </div>`;
@@ -1801,6 +1888,11 @@ const TRADING_ROWS = t => [
   ['التسديدات (التحصيل)', t.collections], ['   نقدي وسندات', t.collections_cash], ['   شيكات', t.collections_cheque], ['   كليك / تحويل', t.collections_bank],
   ['الزيادة في الذمم (المبيعات − التسديدات)', t.receivables_change],
   ['المصاريف', t.expenses], ['صافي الربح بعد المصاريف', t.net_profit],
+  ...(t.unsettled && t.unsettled.any ? [
+    ['⏳ غير مسوّى: كلفة تقديرية لمبيعات أصناف بلا كلفة', -(num(t.unsettled.profit_overstated)||0)],
+    ['صافي الربح بعد التسوية التقديرية', (num(t.net_profit)||0)-(num(t.unsettled.profit_overstated)||0)],
+    ['⏳ غير مسوّى: مشتريات لم تُدخل (أصناف بالسالب، تقدير)', num((t.unsettled.negative||{}).est_value)||0],
+  ] : []),
 ];
 function tradingTable(t){
   const tb = T('حساب المتاجرة والتحصيل', [['k','البيان','text'],['v','القيمة','auto']], TRADING_ROWS(t||{}).map(r=>({k:r[0], v:r[1], _t:r[2]||'jd'})));
@@ -1841,6 +1933,7 @@ function salesHtml(X, Q){
     ${(X.by_van||[]).length>1?`<div><div class="sec-head"><h3>حسب السيارة</h3></div><div class="tablebox"><table><thead><tr><th>السيارة</th><th class="n">فواتير</th><th class="n">كغم</th><th class="n">المبيعات</th><th class="n">متوسط سعر الكيلو</th><th class="n">الربح</th></tr></thead><tbody>
       ${X.by_van.map(d=>`<tr><td>${vanPill(d.van_no)}</td><td class="n">${num(d.n)}</td><td class="n">${kg(d.kg)}</td><td class="n">${jd(d.total)}</td><td class="n">${fmt(num(d.kg)?d.total/d.kg:null,3)}</td><td class="n${ncls(d.profit)}">${jd(d.profit)}</td></tr>`).join('')}
       <tr class="total"><td>الاجمالي / المتوسط</td><td class="n">${sum(X.by_van,'n')}</td><td class="n">${kg(sum(X.by_van,'kg'))}</td><td class="n">${jd(sum(X.by_van,'total'))}</td><td class="n">${fmt(ratio(X.by_van,'total','kg'),3)}</td><td class="n${ncls(sum(X.by_van,'profit'))}">${jd(sum(X.by_van,'profit'))}</td></tr></tbody></table></div></div>`:''}
+    ${unsettledPanel((X.trading||{}).unsettled, {profit: X.profit, profitLabel:'ربح الفواتير المعروض'})}
     ${renderTable(tradingTable(X.trading), 980, '')}`;
 }
 async function loadSales(){
@@ -1906,7 +1999,17 @@ function stockRows(X){
       purchased:m.purchased, purchased_value:m.purchased_value, buy_price: num(m.purchased)?m.purchased_value/m.purchased:null,
       transfer_in:m.transfer_in, in_value:t.in_val||0, transfer_out:m.transfer_out, out_value:t.out_val||0,
       sold:m.sold, cogs:m.cogs, sold_value:m.sold_value, closing_qty:m.closing_qty, closing_cost:m.closing_cost, closing_value:m.closing_value}; })
-    .filter(r => [r.opening_qty,r.purchased,r.transfer_in,r.transfer_out,r.sold,r.closing_qty].some(v => Math.abs(num(v)||0) > 0.0005));
+    .filter(r => [r.opening_qty,r.purchased,r.transfer_in,r.transfer_out,r.sold,r.closing_qty].some(v => Math.abs(num(v)||0) > 0.0005))
+    .map((r, _, all) => {
+      if (r.closing_cost !== null && r.closing_cost !== undefined) return r;
+      // no purchase ever → no cost: use the average cost of the company's stock that has one
+      const pick = all.filter(x => x.company===r.company && x.closing_cost != null && num(x.closing_qty) > 0);
+      const base = pick.length ? pick : all.filter(x => x.closing_cost != null && num(x.closing_qty) > 0);
+      const est = ratio(base, 'closing_value', 'closing_qty');
+      if (est === null) return r;
+      return {...r, est:true, item: r.item + ' (كلفة تقديرية)', closing_cost: est, closing_value: (num(r.closing_qty)||0)*est,
+              cogs: num(r.cogs) ? r.cogs : (num(r.sold)||0)*est};
+    });
 }
 function viewStock(){
   const Q = state.stk || (state.stk = {range:'this_month', from: rangeOf('this_month')[0], to: state.day});
@@ -1930,7 +2033,10 @@ function viewStock(){
   const q = v => kg(v)+' كغم';
   const flow = (lab, a, s) => `<tr><td>${lab}</td><td class="n">${s||''}${kg(a.q)}</td><td class="n">${s||''}${jd(a.v)}</td><td class="n">${num(a.q)?fmt(a.v/a.q,3):'—'}</td></tr>`;
   const byComp = Object.values(rows.reduce((m,r)=>{ const c = m[r.company||'—'] || (m[r.company||'—'] = {company:r.company||'—', opening_qty:0, opening_value:0, purchased:0, purchased_value:0, transfer_in:0, in_value:0, transfer_out:0, out_value:0, sold:0, cogs:0, closing_qty:0, closing_value:0});
-    ['opening_qty','opening_value','purchased','purchased_value','transfer_in','in_value','transfer_out','out_value','sold','cogs','closing_qty','closing_value'].forEach(k=>c[k]+=num(r[k])||0); return m; }, {}));
+    ['opening_qty','opening_value','purchased','purchased_value','transfer_in','in_value','transfer_out','out_value','sold','cogs','closing_qty','closing_value'].forEach(k=>c[k]+=num(r[k])||0);
+    if (r.est) c.est = true;
+    return m; }, {})).map(c=>({...c, buy_price: c.purchased ? c.purchased_value/c.purchased : null, avg_cost: Math.abs(c.closing_qty) > 0.0005 ? c.closing_value/c.closing_qty : null, company: c.company + (c.est ? ' ⚠' : '')}));
+  const nocost = rows.filter(r => r.est);
   const itemCols = [['item','الصنف','text'],['company','الشركة','text'],['opening_qty','أول الفترة كغم','kg'],['opening_value','أول الفترة د.ا','jd'],
     ['purchased','مشتريات كغم','kg'],['purchased_value','مشتريات د.ا','jd'],['buy_price','سعر الشراء','n3'],
     ['transfer_in','وارد كغم','kg'],['in_value','وارد د.ا','jd'],['transfer_out','صادر كغم','kg'],['out_value','صادر د.ا','jd'],
@@ -1945,10 +2051,10 @@ function viewStock(){
       ${tile('الصادر للفروع', jd(to.v), q(to.q))}
       ${tile('صافي المشتريات بعد التحويلات', jd(pu.v+ti.v-to.v), q(pu.q+ti.q-to.q))}
       ${tile('كلفة المباع', jd(so.v), q(so.q)+' · مبيعات '+jd(S('sold_value')))}
-      ${tile('مخزون آخر الفترة', jd(cl.v), q(cl.q), ncls(cl.v))}
+      ${tile('مخزون آخر الفترة', jd(cl.v), q(cl.q)+' · متوسط الكيلو '+fmt(num(cl.q)?cl.v/cl.q:null,3), ncls(cl.v))}
       ${tile('فرق الجرد', jd(cdv), (cdq>0?'نقص ':cdq<0?'زيادة ':'')+kg(Math.abs(cdq))+' كغم', cdv>0.005?' neg':'')}
     </div>
-    ${neg.length?`<div class="banner bad">📦 أصناف بالسالب آخر الفترة (مبيع أكثر من المشترى — مشتريات لم تُدخل أو أُدخلت باسم صنف آخر): ${neg.map(r=>`<b>${esc(r.item)}</b> ${kg(r.closing_qty)} كغم`).join('، ')}</div>`:''}
+    ${unsettledPanel((X.summary||{}).unsettled, {ok:true})}
     <div class="grid2">
       <div class="panel"><div class="sec-head" style="margin:0 0 8px"><h3>معادلة المخزون للفترة</h3></div>
         <div class="tablebox"><table><thead><tr><th>البيان</th><th class="n">كغم</th><th class="n">د.ا</th><th class="n">للكيلو</th></tr></thead><tbody>
@@ -1956,7 +2062,7 @@ function viewStock(){
           ${Math.abs(reval)>=0.5?`<tr><td title="تغيّر متوسط الكلفة خلال الفترة ومخزون الأصناف السالبة">± فرق إعادة التقييم</td><td class="n"></td><td class="n${ncls(reval)}">${jd(reval)}</td><td></td></tr>`:''}
           <tr class="total"><td>= مخزون آخر الفترة</td><td class="n${ncls(cl.q)}">${kg(cl.q)}</td><td class="n${ncls(cl.v)}">${jd(cl.v)}</td><td class="n">${num(cl.q)?fmt(cl.v/cl.q,3):'—'}</td></tr>
         </tbody></table></div></div>
-      <div class="panel">${renderTable(T('حسب الشركة', [['company','الشركة','text'],['purchased','مشتريات كغم','kg'],['purchased_value','مشتريات د.ا','jd'],['transfer_out','صادر كغم','kg'],['out_value','صادر د.ا','jd'],['sold','المباع كغم','kg'],['cogs','كلفة المباع','jd'],['closing_qty','آخر الفترة كغم','kg'],['closing_value','آخر الفترة د.ا','jd']], byComp, {total:true}), 701, '')}</div>
+      <div class="panel">${renderTable(T('حسب الشركة', [['company','الشركة','text'],['purchased','مشتريات كغم','kg'],['purchased_value','مشتريات د.ا','jd'],['buy_price','سعر الشراء','n3'],['transfer_out','صادر كغم','kg'],['out_value','صادر د.ا','jd'],['sold','المباع كغم','kg'],['cogs','كلفة المباع','jd'],['closing_qty','آخر الفترة كغم','kg'],['closing_value','آخر الفترة د.ا','jd'],['avg_cost','متوسط كلفة الكيلو','n4']], byComp, {total:true, ratio:{buy_price:['purchased_value','purchased'], avg_cost:['closing_value','closing_qty']}, note:'متوسط كلفة الكيلو = قيمة آخر الفترة ÷ كمية آخر الفترة (الكمية × المتوسط = القيمة). ⚠ = في الشركة صنف بيع ولم يُشترَ أبداً، قُيّم تقديرياً بمتوسط كلفة شركته.'}), 701, '')}</div>
     </div>
     ${renderTable(T('حسب الصنف', itemCols, rows, {total:true, ratio:{buy_price:['purchased_value','purchased'], closing_cost:['closing_value','closing_qty']}}), 702, '')}
     <div class="grid2">${vanT.map((tb,i)=>`<div style="min-width:0">${renderTable(tb, 710+i, '')}</div>`).join('')}</div>
@@ -1966,11 +2072,205 @@ function viewStock(){
 async function loadStock(){
   const Q = state.stk; if ($('#kFrom')) { Q.from = $('#kFrom').value; Q.to = $('#kTo').value; }
   Q.loading = true; render(); busy(true);
-  try { Q.data = await API.report(Q.from, Q.to, [], ['item_movement','van_stock','transfers'], {}); }
+  try { Q.data = await API.report(Q.from, Q.to, [], ['item_movement','van_stock','transfers','summary'], {}); }
   catch(e){ toast(cleanError(e)); } finally { Q.loading = false; busy(false); if (current()==='stock') render(); }
 }
 
-const VIEWS={today:viewToday,stock:viewStock,sheet:viewSheet,sales:viewSales,purchases:viewPurchases,pnl:viewPnl,bank:viewBank,expenses:viewExpenses,docs:viewDocs,reports:viewReports,debts:viewDebts,vans:viewVans,transfers:viewTransfers,cheques:viewCheques,items:viewItems,control:viewControl};
+// ================================================================ بحث (search page)
+// One word over a period, across the kinds of documents chosen; every row opens its day and its form.
+const SEARCH_KINDS = [['invoices','فواتير البيع'],['collections','سندات القبض'],['purchases','المشتريات'],['transfers','التحويلات'],['expenses','المصاريف'],['deposits','الإيداعات'],['cheques','الشيكات']];
+function viewSearch(){
+  const Q = state.srch || (state.srch = {q:'', range:'this_month', from: rangeOf('this_month')[0], to: state.day, kinds: SEARCH_KINDS.map(k=>k[0]), vans:[]});
+  const X = Q.data;
+  const head = `<div class="panel" style="display:flex;flex-direction:column;gap:12px">
+      <div class="sec-head" style="margin:0"><div><h2>بحث</h2><p>اكتب اسم صنف أو عميل أو شركة أو رقم فاتورة أو شيك، واختر الفترة وأنواع المستندات. كل نتيجة تُفتح وتُعدَّل من هنا.</p></div></div>
+      <div class="controls" style="flex-wrap:wrap"><input type="search" id="srchQ" value="${esc(Q.q)}" placeholder="مثال: دقز حمودة · كندو · v1-203 · حوالة" style="min-width:260px;flex:1" aria-label="كلمة البحث"><button class="btn" type="button" data-act="runSearch">بحث</button></div>
+      <div class="controls" style="flex-wrap:wrap">${RANGES.map(([k,l])=>`<button type="button" class="btn ${Q.range===k?'':'sec'}" data-hrange="${k}">${l}</button>`).join('')}</div>
+      <div class="controls" style="flex-wrap:wrap"><span class="toggle">من <input type="date" id="srchFrom" value="${esc(Q.from)}"></span><span class="toggle">إلى <input type="date" id="srchTo" value="${esc(Q.to)}"></span>
+        <span class="seg" role="group" aria-label="السيارة">${[[0,'كل السيارات'],...vanNos().map(v=>[v,vanName(v)])].map(([v,t])=>`<button type="button" data-hvan="${v}" aria-pressed="${v===0?!Q.vans.length:Q.vans.includes(v)}">${esc(t)}</button>`).join('')}</span></div>
+      <div class="controls" style="flex-wrap:wrap">${SEARCH_KINDS.map(([k,l])=>`<label class="toggle"><input type="checkbox" class="hk" value="${k}" ${Q.kinds.includes(k)?'checked':''}> ${l}</label>`).join('')}</div></div>`;
+  if (!X) return `<section class="view">${head}<div class="panel empty">${Q.loading?'جارٍ البحث…':'اكتب كلمة ثم اضغط «بحث».'}</div></section>`;
+  const n = SEARCH_KINDS.reduce((a,[k])=>a+((X[k]||[]).length),0);
+  const sec = (title, rows, cols, act, totals) => rows && rows.length ? renderTable(T(`${title} (${rows.length})`, cols, rows, {total:true, act, ...(totals||{})}), 'h'+title.length, '') : '';
+  const closedNote = r => r.deleted ? '<span class="pill bad">محذوفة</span>' : '';
+  return `<section class="view">${head}
+    <div class="muted" style="font-size:.9rem">${n?`${n} نتيجة لـ «${esc(X.q)}» من ${dmy(X.from)} إلى ${dmy(X.to)}`:`لا نتائج لـ «${esc(X.q)}» في هذه الفترة.`}</div>
+    ${sec('فواتير البيع', X.invoices, [['day','التاريخ','date'],['van_no','السيارة','van'],['number','الفاتورة','text'],['customer_name','العميل','text'],['receipt_type','النوع','text'],['lines','الأصناف','text'],['match_kg','كغم من الصنف','kg'],['total','المبلغ','jd']],
+        r => `<span class="actions"><button type="button" class="icon-btn" data-receipt2="${r.id}" data-day="${r.day}" title="عرض الإيصال">🧾</button><button type="button" class="icon-btn" data-redit="inv" data-id="${r.id}" data-day="${r.day}">تعديل</button>${delBtn('invoices', r.id, 'حذف فاتورة '+(r.number||'')+' — '+(r.customer_name||'')+' '+jd(r.total))}</span>`, {totalSkip:['number']})}
+    ${sec('سندات القبض', X.collections, [['day','التاريخ','date'],['van_no','السيارة','van'],['number','السند','text'],['customer_name','العميل','text'],['method','النوع','text'],['invoice_number','عن فاتورة','text'],['cheque_no','شيك','text'],['amount','المبلغ','jd']],
+        r => repActs('col', r.id, r.day, 'collections', 'حذف سند '+(r.number||'')+' — '+(r.customer_name||'')+' '+jd(r.amount)))}
+    ${sec('المشتريات', X.purchases, [['day','التاريخ','date'],['van_no','السيارة','van'],['company','الشركة','text'],['item','الصنف','text'],['qty','الوزن','kg'],['price','السعر','n3'],['total','الاجمالي','jd']],
+        r => `<span class="actions"><button type="button" class="icon-btn" data-redit="pur" data-id="${r.id}" data-day="${r.day}">تعديل</button>${delBtn('purchases', r.id, 'حذف سطر مشتريات: '+r.item+' '+kg(r.qty)+' كغم')}${r.batch?`<button type="button" class="icon-btn del" data-delbatch="${r.batch}" data-label="${esc('حذف فاتورة '+r.company+' كاملة · '+dmy(r.day))}">الفاتورة كاملة</button>`:''}</span>`, {ratio:{price:['total','qty']}})}
+    ${sec('التحويلات', X.transfers, [['day','التاريخ','date'],['item','الصنف','text'],['from_name','من','text'],['to_name','الى','text'],['qty','الكمية','kg'],['unit_cost','كلفة الكيلو','n4'],['total_cost','القيمة','jd']],
+        r => repActs('trf', r.id, r.day, 'transfers', 'حذف تحويل '+r.item+' '+kg(r.qty)+' كغم'), {ratio:{unit_cost:['total_cost','qty']}})}
+    ${sec('المصاريف', X.expenses, [['day','التاريخ','date'],['van_no','دُفع من','van'],['category','النوع','text'],['method','الطريقة','text'],['note','ملاحظة','text'],['amount','المبلغ','jd']],
+        r => repActs('exp', r.id, r.day, 'cash_movements', 'حذف مصروف '+(r.category||'')+' '+jd(r.amount)))}
+    ${sec('الإيداعات', X.deposits, [['day','التاريخ','date'],['van_no','السيارة','van'],['kind','النوع','text'],['bank','البنك','text'],['reference','رقم الإيصال','text'],['note','ملاحظة','text'],['amount','المبلغ','jd']],
+        r => repActs('dep', r.id, r.day, 'bank_deposits', 'حذف '+(DEP_KIND[r.kind]||'إيداع')+' '+jd(r.amount)))}
+    ${sec('الشيكات', X.cheques, [['cheque_no','رقم الشيك','text'],['customer_name','العميل','text'],['van_no','السيارة','van'],['amount','المبلغ','jd'],['received_on','الاستلام','date'],['due_on','الاستحقاق','date'],['status','الحالة','text'],['collected_on','التحصيل','date']],
+        r => `<select data-cheque="${r.id}" aria-label="حالة الشيك">${opts(['برسم التحصيل','محصل','مرتجع'], r.status)}</select>`)}
+  </section>`;
+}
+async function runSearch(){
+  const Q = state.srch; if ($('#srchQ')) { Q.q = $('#srchQ').value.trim(); Q.from = $('#srchFrom').value; Q.to = $('#srchTo').value; Q.kinds = [...document.querySelectorAll('input.hk:checked')].map(i=>i.value); }
+  if (!Q.q) { toast('اكتب كلمة البحث'); return; }
+  if (!Q.kinds.length) { toast('اختر نوعاً واحداً على الأقل'); return; }
+  Q.loading = true; Q.data = null; render(); busy(true);
+  try { Q.data = await API.search(Q.q, Q.from, Q.to, Q.kinds, Q.vans); }
+  catch(e){ toast(cleanError(e)); } finally { Q.loading = false; busy(false); if (current()==='search') render(); }
+}
+
+// ================================================================ التدفق النقدي (cash flow page)
+// One set of period figures (cashflow()) arranged into the standard statements. The owner chooses which
+// statements to show and the assumptions behind them; the choices stay on this browser.
+const CF_DEFAULT = { show: ['periodic','direct','indirect','cashbook'], purchasesCash: true, chequeBasis: 'collected', closing: 'auto' };
+function cfPrefs(){ try { return Object.assign({}, CF_DEFAULT, JSON.parse(localStorage.getItem('kv_cf')||'{}')); } catch(e){ return Object.assign({}, CF_DEFAULT); } }
+function cfSave(p){ try { localStorage.setItem('kv_cf', JSON.stringify(p)); } catch(e){} }
+const CF_STATEMENTS = [
+  ['periodic', 'حساب المتاجرة بالجرد الدوري', 'Periodic inventory trading account', 'البسيط: مخزون أول المدة + المشتريات ± التحويلات − مخزون آخر المدة = كلفة البضاعة المباعة؛ المبيعات − الكلفة = مجمل الربح. لا يحتاج كلفة كل صنف، فيكشف ما فات الجرد المستمر.'],
+  ['direct', 'قائمة التدفقات النقدية — الطريقة المباشرة', 'Statement of cash flows, direct method (IAS 7)', 'المقبوضات من العملاء − المدفوعات للموردين − المصاريف المدفوعة = صافي التدفق النقدي من الأنشطة التشغيلية.'],
+  ['indirect', 'قائمة التدفقات النقدية — الطريقة غير المباشرة', 'Indirect method', 'تبدأ من صافي الربح وتعدّله بالتغير في الذمم والمخزون لتصل إلى النقد نفسه. إذا اتفقت مع المباشرة فالأرقام متسقة.'],
+  ['cashbook', 'كشف الصندوق (النقد خارج البنك)', 'Cash book / undeposited cash', 'أول المدة + المقبوضات − المصاريف النقدية − الإيداعات = ما يجب أن يكون في يد السائقين الآن، مقابل ما تقوله اللوحة.'],
+];
+function cfClosing(X, P){
+  const I = X.inventory||{}; const full = num(I.items) > 0 && num(I.counted_items) >= num(I.items);
+  const c = P.closing;
+  if ((c==='auto' || c==='manual') && I.manual_value !== null && I.manual_value !== undefined) return {v:num(I.manual_value), src:'manual', label:'قيمة الجرد الفعلي المدخلة يدوياً'+(I.manual_note?' — '+I.manual_note:'')};
+  if ((c==='auto' || c==='counted') && full) return {v:num(I.closing_counted_value), src:'counted', label:'الجرد الفعلي المعدود (كل الأصناف) × الكلفة'};
+  if (c==='counted' && num(I.counted_items) > 0) return {v:num(I.closing_counted_value)+num(I.uncounted_book_value), src:'partial', label:`جرد جزئي: ${num(I.counted_items)} من ${num(I.items)} صنف معدودة والباقي دفتري`};
+  if (c==='manual' && I.manual_other_scope !== null && I.manual_other_scope !== undefined) return {v:num(I.closing_book_value), src:'book', label:'الدفتري (القيمة اليدوية المدخلة لنطاق آخر: سيارة بدل الشركة أو العكس)'};
+  return {v:num(I.closing_book_value), src:'book', label:'الدفتري (لا جرد كامل ولا قيمة يدوية لهذا اليوم)'};
+}
+function cfStatements(X, P){
+  const R = X.receipts||{}, PU = X.purchases||{}, TR = X.transfers||{}, EX = X.expenses||{}, DP = X.deposits||{}, CB = X.cash_box||{}, SL = X.sales||{}, RC = X.receivables||{}, I = X.inventory||{}, U = X.unsettled||{};
+  const n = v => num(v)||0;
+  const chq = P.chequeBasis==='received' ? n(R.cheques_received) : n(R.cheques_collected);
+  const receipts = n(R.cash) + n(R.bank) + chq;
+  const paidSuppliers = P.purchasesCash ? n(PU.value) : 0;
+  const expenses = n(EX.total);
+  const direct = receipts - paidSuppliers - expenses;
+  const cl = cfClosing(X, P);
+  const available = n(I.opening_value) + n(PU.value) + n(TR.in) - n(TR.out);
+  const cogsP = available - cl.v;
+  const grossP = n(SL.total) - cogsP;
+  const diffCogs = cogsP - n(SL.cogs);
+  const recvOpen = n(RC.opening) + (P.chequeBasis==='received' ? 0 : n(R.cheques_pending_start));
+  const recvClose = n(RC.closing) + (P.chequeBasis==='received' ? 0 : n(R.cheques_pending_end));
+  const dRecv = recvClose - recvOpen, dInv = cl.v - n(I.opening_value);
+  const netProfit = grossP - expenses;
+  const indirect = netProfit - dRecv - dInv + (P.purchasesCash ? 0 : n(PU.value)) - (n(TR.out) - n(TR.in));
+  const cashbookEnd = n(CB.opening) + n(R.cash) + n(R.cheques_received) - n(EX.cash) - n(DP.total);
+  const row = (k, v, t, cls) => ({k, v, _t:t||'jd', cls});
+  const S = {};
+  S.periodic = { rows: [
+      row('مخزون أول المدة (بالكلفة)', I.opening_value), row('   الكمية (كغم)', I.opening_kg, 'kg'),
+      row('+ المشتريات', PU.value), row('   الكمية (كغم)', PU.kg, 'kg'),
+      row('+ وارد من الفروع (بالكلفة)', TR.in), row('− صادر للفروع (بالكلفة)', -n(TR.out)),
+      row('= البضاعة المتاحة للبيع', available, 'jd', 'sub'),
+      row('− مخزون آخر المدة: ' + cl.label, -cl.v),
+      row('= كلفة البضاعة المباعة (بالجرد الدوري)', cogsP, 'jd', 'sub'),
+      row('المبيعات', SL.total), row('   الكمية (كغم)', SL.kg, 'kg'),
+      row('= مجمل الربح بالجرد الدوري', grossP, 'jd', 'total'), row('   هامش الربح', n(SL.total)?grossP/n(SL.total):null, 'pct'),
+      row('للمقارنة: كلفة المبيعات بالجرد المستمر (صنفاً صنفاً)', SL.cogs), row('للمقارنة: مجمل الربح بالجرد المستمر', SL.gross),
+      row(diffCogs>=0?'الفرق: كلفة لم يفسّرها الجرد المستمر (عجز أو مشتريات/تحويلات لم تُدخل أو أسعار كلفة)':'الفرق: بضاعة أكثر مما يقوله الجرد المستمر (فائض أو مبيعات لم تُدخل)', diffCogs, 'jd', Math.abs(diffCogs)>1?'warn':''),
+      ...(n(U.profit_overstated)?[row('   منها غير مسوّى: مبيعات أصناف بلا كلفة (تقدير)', U.profit_overstated)]:[]),
+    ], closing: cl, cogsP, grossP, diffCogs };
+  S.direct = { rows: [
+      row('المقبوضات من العملاء', receipts, 'jd', 'sub'),
+      row('   نقداً وسندات', R.cash), row('   كليك / تحويل بنكي', R.bank),
+      row(P.chequeBasis==='received' ? '   شيكات مستلمة (تُعدّ نقداً عند الاستلام)' : '   شيكات محصّلة في الفترة (' + n(R.cheques_collected_n) + ')', chq),
+      ...(P.chequeBasis==='received'?[]:[row('   (شيكات مستلمة ولم تُحصّل بعد — ليست نقداً)', R.cheques_pending_end)]),
+      row(P.purchasesCash ? '− المدفوعات للموردين (المشتريات، بافتراض الدفع عند الشراء)' : '− المدفوعات للموردين (غير مسجّلة — المشتريات آجلة)', -paidSuppliers),
+      row('− المصاريف المدفوعة', -expenses), row('   نقدي', EX.cash), row('   بنكي / كليك', EX.bank), row('   شيكات', EX.cheque),
+      row('= صافي التدفق النقدي من الأنشطة التشغيلية', direct, 'jd', 'total'),
+      row('أنشطة استثمارية وتمويلية (شراء معدات، سحوبات ورأس مال، قروض): غير مسجّلة في النظام', null, 'text'),
+      row('للعلم: بضاعة حُوّلت للفروع بالكلفة — ليست نقداً', TR.out),
+    ], value: direct };
+  S.indirect = { rows: [
+      row('مجمل الربح بالجرد الدوري', grossP), row('− المصاريف', -expenses), row('= صافي الربح', netProfit, 'jd', 'sub'),
+      row((dRecv>=0?'− زيادة':'+ نقص') + ' الذمم على العملاء' + (P.chequeBasis==='received'?'':' (مع الشيكات غير المحصلة)'), -dRecv),
+      row((dInv>=0?'− زيادة':'+ نقص') + ' المخزون (بالكلفة)', -dInv),
+      ...(P.purchasesCash?[]:[row('+ مشتريات آجلة لم تُدفع (ذمم للموردين)', PU.value)]),
+      row('− صادر للفروع بالكلفة + وارد منها (نقص في المخزون بلا نقد)', -(n(TR.out) - n(TR.in))),
+      row('= صافي التدفق النقدي من الأنشطة التشغيلية', indirect, 'jd', 'total'),
+      row('المباشرة أعطت', direct), row(Math.abs(indirect-direct)>1?'فرق بين الطريقتين (فروق تقييم أو غير مسوّى)':'الطريقتان متفقتان ✓', indirect-direct, 'jd', Math.abs(indirect-direct)>1?'warn':''),
+    ], value: indirect };
+  S.cashbook = { rows: [
+      row('رصيد أول المدة خارج البنك (غير مودع)', CB.opening),
+      row('+ مقبوضات نقدية وسندات', R.cash), row('+ شيكات مستلمة', R.cheques_received),
+      row('− مصاريف نقدية', -n(EX.cash)), row('− إيداعات نقدية', -n(DP.cash)), row('− إيداعات شيكات', -n(DP.cheque)),
+      row('= ما يجب أن يكون خارج البنك آخر المدة', cashbookEnd, 'jd', 'total'),
+      row('ما تقوله اللوحة الآن (غير مودع)', CB.closing), row('   منه نقد', CB.closing_cash), row('   منه شيكات', CB.closing_cheques),
+      row(Math.abs(cashbookEnd-n(CB.closing))>1?'فرق يحتاج تفسيراً':'متطابق ✓', cashbookEnd-n(CB.closing), 'jd', Math.abs(cashbookEnd-n(CB.closing))>1?'warn':''),
+      row('أودع في البنك خلال المدة', DP.total),
+    ], value: cashbookEnd };
+  return S;
+}
+function cfTable(id, S, X){
+  const meta = CF_STATEMENTS.find(s=>s[0]===id); const st = S[id];
+  return `<div class="panel"><div class="sec-head" style="margin-bottom:6px"><div><h3>${meta[1]}</h3><p>${meta[3]} <span class="muted" style="direction:ltr;display:inline-block">(${meta[2]})</span></p></div></div>
+    <div class="tablebox"><table><thead><tr><th>البيان</th><th class="n">د.ا</th></tr></thead><tbody>
+    ${st.rows.map(r=>r._t==='text'?`<tr><td colspan="2" class="muted" style="white-space:normal;font-size:.8rem">${esc(r.k)}</td></tr>`:`<tr class="${r.cls==='total'?'total':r.cls==='sub'?'sub':''}"><td style="white-space:normal${r.cls==='warn'?';color:var(--warn);font-weight:600':''}">${esc(r.k)}</td><td class="n${num(r.v)<0?' neg':''}${r.cls==='warn'?' warn':''}" style="${r.cls==='warn'?'color:var(--warn);font-weight:600':''}">${r.v===null||r.v===undefined?'—':cellText(r.v, r._t, {})}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+function viewCashflow(){
+  const Q = state.cf || (state.cf = {range:'this_month', from: rangeOf('this_month')[0], to: state.day, vans:[]});
+  const P = cfPrefs(); const X = Q.data;
+  const head = `<div class="panel" style="display:flex;flex-direction:column;gap:12px">
+      <div class="sec-head" style="margin:0"><div><h2>التدفق النقدي</h2><p>من أين جاء النقد وأين ذهب في فترة، بأكثر من عرض محاسبي، مع حساب المتاجرة البسيط بالجرد الدوري. اختر الفترة والسيارات، وغيّر الافتراضات من «الإعدادات».</p></div>
+        <span class="controls">${X?`<button class="btn sec" type="button" data-act="cfPrint">تنزيل للطباعة</button>`:''}<button class="btn sec" type="button" data-act="cfSettings">⚙ الإعدادات</button></span></div>
+      <div class="controls" style="flex-wrap:wrap">${RANGES.map(([k,l])=>`<button type="button" class="btn ${Q.range===k?'':'sec'}" data-cfrange="${k}">${l}</button>`).join('')}</div>
+      <div class="controls" style="flex-wrap:wrap"><span class="toggle">من <input type="date" id="cfFrom" value="${esc(Q.from)}"></span><span class="toggle">إلى <input type="date" id="cfTo" value="${esc(Q.to)}"></span>
+        <span class="seg" role="group" aria-label="السيارة">${[[0,'كل السيارات'],...vanNos().map(v=>[v,vanName(v)])].map(([v,t])=>`<button type="button" data-cfvan="${v}" aria-pressed="${v===0?!Q.vans.length:Q.vans.includes(v)}">${esc(t)}</button>`).join('')}</span>
+        <button class="btn" type="button" data-act="loadCf">عرض</button>${Q.loading?'<span class="muted">جارٍ الحساب…</span>':''}</div></div>`;
+  if (!X) return `<section class="view">${head}<div class="panel empty">${Q.loading?'جارٍ الحساب…':'اختر الفترة ثم اضغط «عرض».'}</div></section>`;
+  const S = cfStatements(X, P); const I = X.inventory||{};
+  const tile = (l,v,sub,cls) => `<div class="kpi"><div class="label">${l}</div><div class="value${cls||''}">${v}</div><div class="sub">${sub||''}</div></div>`;
+  const vl = state.cfVals || [];
+  return `<section class="view">${head}
+    <div class="kpis four panel">
+      ${tile('المقبوضات من العملاء', jd(S.direct.rows[0].v), P.chequeBasis==='received'?'الشيكات عند استلامها':'الشيكات عند تحصيلها')}
+      ${tile('صافي التدفق النقدي التشغيلي', jd(S.direct.value), P.purchasesCash?'المشتريات مدفوعة عند الشراء':'بدون مدفوعات الموردين', ncls(S.direct.value))}
+      ${tile('مجمل الربح بالجرد الدوري', jd(S.periodic.grossP), 'آخر المدة: '+({manual:'قيمة يدوية',counted:'جرد معدود',partial:'جرد جزئي',book:'دفتري'}[S.periodic.closing.src]), ncls(S.periodic.grossP))}
+      ${tile('خارج البنك الآن', jd((X.cash_box||{}).closing), 'نقد '+jd((X.cash_box||{}).closing_cash)+' · شيكات '+jd((X.cash_box||{}).closing_cheques))}
+    </div>
+    ${unsettledPanel(X.unsettled, {profit:S.periodic.grossP - (num((X.expenses||{}).total)||0), profitLabel:'صافي الربح بالجرد الدوري'})}
+    <div class="panel"><div class="sec-head" style="margin-bottom:6px"><div><h3>قيمة الجرد الفعلي في ${esc(dmy(Q.to))}</h3><p>إن لم يكن هناك جرد كامل ذلك اليوم، اكتب قيمة البضاعة الموجودة بالكلفة (بالدينار) وستُستخدم كمخزون آخر المدة في حساب المتاجرة. المعدود: ${num(I.counted_items)} من ${num(I.items)} صنف${num(I.counted_items)?` بقيمة ${jd(I.closing_counted_value)}`:''} · الدفتري ${jd(I.closing_book_value)} (${kg(I.closing_book_kg)} كغم).</p></div></div>
+      <div class="controls" style="flex-wrap:wrap"><span class="toggle">القيمة <input type="number" id="cfValV" inputmode="decimal" min="0" step="0.01" value="${I.manual_value!==null&&I.manual_value!==undefined?esc(num(I.manual_value)):''}" style="width:130px;font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);direction:ltr"></span>
+        <span class="toggle">ملاحظة <input type="text" id="cfValN" value="${esc(I.manual_note||'')}" placeholder="مثال: جرد المستودع مساءً" style="width:220px;font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)"></span>
+        <button class="btn" type="button" data-act="cfSaveVal">حفظ القيمة لـ ${Q.vans.length===1?esc(vanName(Q.vans[0])):'الشركة'}</button>${I.manual_value!==null&&I.manual_value!==undefined?`<button class="btn sec" type="button" data-act="cfClearVal">إزالة</button>`:''}</div>
+      ${vl.length?`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:.85rem">القيم المدخلة سابقاً (${vl.length})</summary><div class="tablebox" style="margin-top:6px"><table><thead><tr><th>التاريخ</th><th>النطاق</th><th class="n">القيمة</th><th>ملاحظة</th><th>أدخلها</th></tr></thead><tbody>${vl.map(v=>`<tr><td>${esc(dmy(v.day))}</td><td>${v.van_no?vanName(v.van_no):'الشركة'}</td><td class="n">${jd(v.value)}</td><td>${esc(v.note||'')}</td><td class="muted">${esc(v.updated_by||'')}</td></tr>`).join('')}</tbody></table></div></details>`:''}</div>
+    <div class="grid2">${P.show.map(id=>cfTable(id, S, X)).join('')}</div>
+  </section>`;
+}
+function cfSettingsForm(){
+  const P = cfPrefs();
+  openModal(`<h2>إعدادات التدفق النقدي</h2>
+    <div class="field"><label>القوائم المعروضة</label>${CF_STATEMENTS.map(s=>`<label class="toggle" style="display:flex;gap:8px;padding:3px 0"><input type="checkbox" name="show" value="${s[0]}" ${P.show.includes(s[0])?'checked':''}> <span>${s[1]} <span class="muted" style="font-size:.78rem;direction:ltr;display:inline-block">(${s[2]})</span></span></label>`).join('')}</div>
+    <div class="form-grid">
+      <div class="field"><label for="f_pc">المشتريات</label><select id="f_pc" name="purchasesCash"><option value="1" ${P.purchasesCash?'selected':''}>تُدفع عند الشراء (تُعدّ نقداً خارجاً)</option><option value="0" ${!P.purchasesCash?'selected':''}>آجلة — دفعات الموردين غير مسجّلة</option></select></div>
+      <div class="field"><label for="f_cb">الشيكات تُعدّ نقداً</label><select id="f_cb" name="chequeBasis"><option value="collected" ${P.chequeBasis==='collected'?'selected':''}>عند تحصيلها (الأدق)</option><option value="received" ${P.chequeBasis==='received'?'selected':''}>عند استلامها</option></select></div>
+      <div class="field"><label for="f_cl">مخزون آخر المدة</label><select id="f_cl" name="closing"><option value="auto" ${P.closing==='auto'?'selected':''}>تلقائي: يدوي ← جرد معدود كامل ← دفتري</option><option value="manual" ${P.closing==='manual'?'selected':''}>القيمة اليدوية فقط (وإلا الدفتري)</option><option value="counted" ${P.closing==='counted'?'selected':''}>الجرد المعدود (ولو جزئياً، والباقي دفتري)</option><option value="book" ${P.closing==='book'?'selected':''}>الدفتري دائماً</option></select></div>
+    </div>
+    <p class="muted" style="margin:0;font-size:.8rem">هذه الاختيارات تُحفظ على هذا الجهاز فقط ولا تغيّر شيئاً في قاعدة البيانات.</p>`,
+    async (fd, form) => { cfSave({show: [...form.querySelectorAll('input[name=show]:checked')].map(i=>i.value), purchasesCash: fd.get('purchasesCash')==='1', chequeBasis: fd.get('chequeBasis'), closing: fd.get('closing')}); render(); return 'حُفظت الإعدادات'; });
+}
+async function loadCf(){
+  const Q = state.cf; if ($('#cfFrom')) { Q.from = $('#cfFrom').value; Q.to = $('#cfTo').value; }
+  Q.loading = true; render(); busy(true);
+  try { const [d, vals] = await Promise.all([API.cashflow(Q.from, Q.to, Q.vans), API.valuations().catch(()=>[])]); Q.data = d; state.cfVals = vals||[]; }
+  catch(e){ toast(cleanError(e)); } finally { Q.loading = false; busy(false); if (current()==='cashflow') render(); }
+}
+function cfPrintHtml(X){
+  const P = cfPrefs(), S = cfStatements(X, P);
+  const tbl = id => { const m = CF_STATEMENTS.find(s=>s[0]===id), st = S[id]; return `<div style="font-weight:700;margin:14px 0 6px">${m[1]}</div><table style="font-size:12px;max-width:640px"><tbody>${st.rows.map(r=>r._t==='text'?`<tr><td colspan="2" style="color:#555;font-size:11px">${esc(r.k)}</td></tr>`:`<tr style="${r.cls==='total'?'background:#eef2f0;font-weight:700;':r.cls==='sub'?'font-weight:600;':''}"><td style="color:#111">${esc(r.k)}</td><td class="n" style="color:${num(r.v)<0?'#b4372f':'#111'}">${r.v===null||r.v===undefined?'—':cellText(r.v, r._t, {})}</td></tr>`).join('')}</tbody></table>`; };
+  return `<div class="stmt-doc" style="background:#fff;color:#111;padding:22px;border-radius:8px;border:1px solid #ccc;font-family:Tahoma,Arial,sans-serif">
+    ${docHead('التدفق النقدي وحساب المتاجرة', [['من تاريخ',dmy(X.from)],['إلى تاريخ',dmy(X.to)],['السيارة',X.vans&&X.vans.length?X.vans.map(vanName).join('، '):'كل السيارات'],['تاريخ الطباعة',dmy(today)]])}
+    ${P.show.map(tbl).join('')}
+    <div style="font-size:11px;color:#555;margin-top:8px">الافتراضات: المشتريات ${P.purchasesCash?'تُدفع عند الشراء':'آجلة'} · الشيكات نقد عند ${P.chequeBasis==='received'?'الاستلام':'التحصيل'} · مخزون آخر المدة: ${esc(S.periodic.closing.label)}.</div></div>`;
+}
+
+const VIEWS={today:viewToday,stock:viewStock,search:viewSearch,cashflow:viewCashflow,sheet:viewSheet,sales:viewSales,purchases:viewPurchases,pnl:viewPnl,bank:viewBank,expenses:viewExpenses,docs:viewDocs,reports:viewReports,debts:viewDebts,vans:viewVans,transfers:viewTransfers,cheques:viewCheques,items:viewItems,control:viewControl};
 function current(){ const h=location.hash.slice(1); const T=window.VTABS||[]; if (T.length) return (VIEWS[h]&&T.includes(h))?h:T[0]; return VIEWS[h]?h:'today'; }
 function alignHeads(root){
   (root||document).querySelectorAll('table').forEach(t=>{
@@ -2048,6 +2348,18 @@ main.addEventListener('click', async e=>{
   if (ds.act==='exportSetup') return exportSetup();
   if (ds.act==='salesXlsx') return salesExport('xlsx');
   if (ds.act==='salesHtml') return salesExport('html');
+  if (ds.act==='runSearch') return runSearch();
+  if (ds.act==='loadCf') return loadCf();
+  if (ds.act==='cfSettings') return cfSettingsForm();
+  if (ds.act==='cfPrint') { const X = state.cf && state.cf.data; if (X) saveDoc('التدفق النقدي', cfPrintHtml(X), `التدفق النقدي ${X.from} - ${X.to}.html`); return; }
+  if (ds.act==='cfSaveVal' || ds.act==='cfClearVal') { const Q = state.cf; const v = ds.act==='cfClearVal' ? '' : $('#cfValV').value;
+    if (ds.act==='cfSaveVal' && (v==='' || !(Number(v)>=0))) { toast('اكتب قيمة الجرد'); return; }
+    try { await sql(`select office_set_valuation(${lit(JSON.stringify({day:Q.to, van_no:Q.vans.length===1?Q.vans[0]:'', value:v, note:$('#cfValN')?$('#cfValN').value:''}))}::jsonb, ${lit(ACTOR)})`); toast(ds.act==='cfClearVal'?'أُزيلت القيمة':'حُفظت قيمة الجرد'); return loadCf(); } catch(ex){ toast(cleanError(ex)); } return; }
+  if (ds.cfrange) { const Q = state.cf; Q.range = ds.cfrange; const [f,to] = rangeOf(ds.cfrange); Q.from=f; Q.to=to; render(); return loadCf(); }
+  if (ds.cfvan !== undefined) { const Q = state.cf; const v = Number(ds.cfvan); Q.vans = v ? (Q.vans.includes(v) ? Q.vans.filter(x=>x!==v) : [...Q.vans, v]) : []; render(); return loadCf(); }
+  if (ds.hrange) { const Q = state.srch; if ($('#srchQ')) Q.q = $('#srchQ').value.trim(); Q.range = ds.hrange; const [f,to] = rangeOf(ds.hrange); Q.from=f; Q.to=to; render(); return Q.q ? runSearch() : undefined; }
+  if (ds.hvan !== undefined) { const Q = state.srch; if ($('#srchQ')) Q.q = $('#srchQ').value.trim(); const v = Number(ds.hvan); Q.vans = v ? (Q.vans.includes(v) ? Q.vans.filter(x=>x!==v) : [...Q.vans, v]) : []; render(); return Q.q ? runSearch() : undefined; }
+  if (ds.receipt2) return openOnDay(ds.day, () => { const el = document.querySelector(`[data-receipt="${ds.receipt2}"]`); const v = find(D.invoices, ds.receipt2); if (v) receiptView(v); else toast('الفاتورة غير موجودة'); });
   if (ds.krange) { const Q = state.stk; Q.range = ds.krange; const [f,to] = rangeOf(ds.krange); Q.from=f; Q.to=to; render(); return loadStock(); }
   if (ds.act==='loadStock') return loadStock();
   if (ds.srange) { const Q = state.sales; Q.range = ds.srange; const [f,to] = rangeOf(ds.srange); Q.from=f; Q.to=to; render(); return loadSales(); }
@@ -2138,6 +2450,7 @@ main.addEventListener('click', async e=>{
   if (ds.edititem) return itemForm(find(D.items, ds.edititem));
   if (ds.count) return countForm(Number(ds.count));
   if ((ds.del || ds.delbatch || ds.redit) && current()==='reports') state.afterSave = runReport;
+  if ((ds.del || ds.delbatch || ds.redit) && current()==='search') state.afterSave = runSearch;
   if (ds.del) return confirmDelete(ds.label, ds.del, ds.id);
   if (ds.delbatch) return confirmDeleteBatch(ds.label, ds.delbatch);
   if (ds.resbatch) { try { await sql(`select office_restore_purchase_receipt(${lit(ds.resbatch)}::uuid, ${lit(ACTOR)}) as n`); toast('استُرجعت الفاتورة'); load(); } catch(ex){ toast(cleanError(ex)); } return; }
@@ -2145,6 +2458,9 @@ main.addEventListener('click', async e=>{
       if (ds.redit==='col') { const c = find(D.collections, id); return c ? collectionForm(c) : toast('السند غير موجود'); }
       if (ds.redit==='dep') { const d = find(D.deposits, id); return d ? depositForm({...d, day:state.day}) : toast('الإيداع غير موجود'); }
       if (ds.redit==='pur') { const p = find(D.purchases, id); return p ? purchaseEdit(p) : toast('السطر غير موجود'); }
+      if (ds.redit==='inv') { const v = find(D.invoices, id); return v ? invoiceForm(v) : toast('الفاتورة غير موجودة'); }
+      if (ds.redit==='trf') { const t = find(D.transfers, id); return t ? transferForm(t) : toast('التحويل غير موجود'); }
+      if (ds.redit==='exp') { const m = find(D.expenses, id); return m ? expenseForm({...m, day:state.day}) : toast('المصروف غير موجود'); }
     }); }
   if (ds.restore) return restoreRow(ds.restore, ds.id);
   if (ds.sv !== undefined) { state.sheetVan=Number(ds.sv); return render(); }
@@ -2208,6 +2524,7 @@ main.addEventListener('change', async e=>{
     try { await sql(`select office_set_setting(${van}, ${lit(el.dataset.set)}, ${lit(el.value)}, ${lit(ACTOR)})`); toast('حُفظ الإعداد'); load(); } catch(ex){ toast(cleanError(ex)); }
   }
 });
+main.addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.id==='srchQ'){ e.preventDefault(); runSearch(); } });
 main.addEventListener('input',e=>{ if(e.target.id==='custQ'){ state.q=e.target.value; const pos=e.target.selectionStart; render(); const i=$('#custQ'); i.focus(); i.setSelectionRange(pos,pos);} });
 
 // ================================================================ start
@@ -2242,6 +2559,9 @@ API = {
   pnl: (f, t, vs) => rpc('viewer_profit_loss', {...tk(), p_from:f, p_to:t, p_vans:vs&&vs.length?vs.map(Number):null}),
   sales: (f, t, vs, ty, cu) => rpc('viewer_sales_list', {...tk(), p_from:f, p_to:t, p_vans:vs&&vs.length?vs.map(Number):null, p_type:ty||null, p_customer:cu||null}),
   trading: (f, t, vs) => rpc('viewer_trading', {...tk(), p_from:f, p_to:t, p_vans:vs&&vs.length?vs.map(Number):null}),
+  cashflow: (f, t, vs) => rpc('viewer_cashflow', {...tk(), p_from:f, p_to:t, p_vans:vs&&vs.length?vs.map(Number):null}),
+  valuations: () => Promise.resolve([]),
+  search: (q, f, t, ks, vs) => rpc('viewer_search', {...tk(), p_q:q, p_from:f, p_to:t, p_kinds:ks, p_vans:vs&&vs.length?vs.map(Number):null}),
 };
 // saves: the dashboard writes "select office_xxx(<literals>) [->>'k'] [as a]"; read the literals back and
 // send them to viewer_exec, which decides (page rights, vans, days) and calls the same function.
