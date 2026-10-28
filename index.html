@@ -176,6 +176,7 @@ tr.foot-heads th{font-weight:600;color:var(--muted);font-size:.72rem;background:
 tbody tr:not(.total):not(.sub):hover>td{background:var(--accent-soft)}
 
 /* managers' page. Never: deleting, restoring, settings, vans, PINs, managers, closing a day */
+html.ro .owner-strict{display:none!important}
 html.ro [data-act=newVan],html.ro [data-act=maintOn],html.ro [data-act=maintOff],html.ro [data-sreceipt]~.pill,html.ro [data-act=toggleClose],
 html.ro [data-act=savePreset],html.ro [data-act=delPreset],html.ro [data-act=newViewer],html.ro [data-editvan],html.ro [data-del],html.ro [data-restore],
 html.ro [data-pin],html.ro [data-revoke],html.ro [data-rmphoto],html.ro [data-delbatch],html.ro [data-resbatch],html.ro [data-redit],html.ro .rc-acts,html.ro details,html.ro label:has(#showDel){display:none!important}
@@ -1112,11 +1113,36 @@ function unsettledPanel(u, o={}){
     <div class="tablebox" style="background:transparent"><table style="font-size:.86rem"><tbody>
       ${num(nc.lines)?row('مبيعات أصناف بلا كلفة (لم تُشترَ أبداً)', jd(nc.sales)+' د.ا', `${kg(nc.kg)} كغم في ${num(nc.lines)} سطر · كلفتها التقديرية <b>${jd(nc.est_cogs)}</b> — الربح المعروض أعلى من الحقيقي بهذا المقدار<br>${chips(nc.items, r=>' '+kg(r.kg)+' كغم · '+jd(r.sales)+' د.ا')}`):''}
       ${num(ng.items)?row('أصناف بالسالب — مشتريات لم تُدخل', jd(sm)+' د.ا', `${num(ng.items)} صنف · ${kg(-num(ng.kg))} كغم ناقصة · القيمة تقدير لما لم يُدخل من مشتريات<br>${chips(ng.rows, r=>' '+kg(r.qty))}`):''}
-      ${num(vn.items)?row('سيارة بالسالب والصنف موجود في سيارة أخرى — تحويل بين السيارات لم يُسجَّل', jd(num(vn.est_value)||0)+' د.ا', `${num(vn.items)} صنف · ${kg(-num(vn.kg))} كغم · لا يغيّر مخزون الشركة ولا الربح، لكنه يُفسد مخزون كل سيارة وجردها<br>${chips(vn.rows, r=>' '+vanName(r.van_no)+' '+kg(r.qty))}`):''}
+      ${num(vn.items)?row('سيارة بالسالب والصنف موجود في سيارة أخرى — تحويل بين السيارات لم يُسجَّل', jd(num(vn.est_value)||0)+' د.ا', `${num(vn.items)} صنف · ${kg(-num(vn.kg))} كغم · لا يغيّر مخزون الشركة ولا الربح، لكنه يُفسد مخزون كل سيارة وجردها<br>${chips(vn.rows, r=>' '+vanName(r.van_no)+' '+kg(r.qty))}<br><button type="button" class="btn sec owner-strict" style="margin-top:6px;font-size:.82rem;padding:4px 10px" data-act="autoTransfers" data-asof="${esc(u.as_of||u.to||'')}">⇄ تسجيل التحويلات تلقائياً بتاريخ كل بيع</button>`):''}
       ${o.profit!==undefined && po ? row('الربح بعد التسوية التقديرية', jd((num(o.profit)||0)-po)+' د.ا', `${o.profitLabel||'الربح المعروض'} ${jd(o.profit)} − كلفة تقديرية ${jd(po)}`, (num(o.profit)||0)-po<0?' neg':'') : ''}
     </tbody></table></div>
     <div class="muted" style="font-size:.8rem;margin-top:6px">للتسوية: أدخل مشتريات هذه الأصناف بتاريخها (أو حوّلها من الصنف الذي اشتُريت باسمه)، وسجّل التحويلات بين السيارات. تختفي هذه اللوحة تلقائياً عندما تصح الأرقام.</div>
   </div>`;
+}
+// the missing van-to-van transfers, dated the day of each sale: preview first, then one click records them all
+async function autoTransfers(asOf){
+  const to = asOf || state.day;
+  toast('جارٍ حساب التحويلات…');
+  let j; try { j = await sqlJson(`auto_transfers(${lit(to)}::date, null, false)`); } catch(e){ toast(cleanError(e)); return; }
+  j = Array.isArray(j) ? j[0] : j;
+  const rows = (j&&j.rows||[]).filter(r=>!r.missing), miss = (j&&j.rows||[]).filter(r=>r.missing);
+  if (!rows.length) { toast('لا تحويلات ناقصة حتى ' + dmy(to)); return; }
+  const short = rows.filter(r=>r.short);
+  const tbl = `<div class="tablebox" style="max-height:50vh;overflow:auto"><table style="font-size:.84rem"><thead><tr><th>التاريخ</th><th>الصنف</th><th>من</th><th>إلى</th><th class="n">كغم</th><th class="n">الكلفة</th><th class="n">القيمة</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr${r.short?' style="color:var(--bad)"':''}><td>${dmy(r.day)}</td><td>${esc(r.item)}</td><td>${esc(vanName(r.from_van))}</td><td>${esc(vanName(r.to_van))}</td><td class="n">${kg(r.qty)}</td><td class="n">${r.cost==null?'—':fmt(r.cost,3)}</td><td class="n">${jd(r.value)}</td></tr>`).join('')}
+    <tr class="total"><td colspan="4">الاجمالي · ${rows.length} تحويل</td><td class="n">${kg(sum(rows,'qty'))}</td><td class="n"></td><td class="n">${jd(sum(rows,'value'))}</td></tr>
+    </tbody></table></div>`;
+  openModal(`<h2>⇄ التحويلات الناقصة بين السيارات حتى ${esc(dmy(to))}</h2>
+    <p class="muted" style="margin:0 0 8px;font-size:.86rem">لكل يوم باعت فيه سيارة صنفاً لم يكن عندها، يُسجَّل تحويل بتاريخ ذلك اليوم من السيارة التي كان الصنف عندها، بالكمية الناقصة فقط، وبكلفة ذلك اليوم — فتصبح كلفة البيع صحيحة في السيارتين. تظهر هذه التحويلات في «التحويلات» ويمكن حذفها كأي تحويل.</p>
+    ${short.length?`<p style="margin:0 0 8px;font-size:.84rem;color:var(--bad)"><b>${short.length} تحويل بالأحمر:</b> السيارة المصدر لم يكن عندها الصنف في ذلك اليوم أيضاً (${kg(sum(short,'qty'))} كغم) — يُسجَّل التحويل منها لأنها التي تشتريه، ويبقى النقص عندها حتى تُدخل مشترياتها.</p>`:''}
+    ${miss.length?`<p class="muted" style="margin:0 0 8px;font-size:.82rem">${miss.length} حالة (${kg(sum(miss,'qty'))} كغم) لا يمكن تحويلها: الصنف لم تشترِه أي سيارة — تُحلّ بإدخال المشتريات.</p>`:''}
+    ${tbl}`,
+    async () => {
+      const r = await sqlJson(`auto_transfers(${lit(to)}::date, null, true, ${lit(ACTOR)})`);
+      const x = Array.isArray(r) ? r[0] : r;
+      return `سُجّل ${x&&x.created||0} تحويلاً (${kg(x&&x.kg||0)} كغم) وأُعيد حساب الكلفة`;
+    });
+  $('#msave').textContent = `تسجيل ${rows.length} تحويلاً`;
 }
 function todayReminders(){
   const mp = D.missing_photos || {}, nMiss = (num(mp.purchase)||0)+(num(mp.expense)||0)+(num(mp.deposit)||0);
@@ -1672,7 +1698,7 @@ function usagePanel(u){
 function viewControl(){
   if (!state.viewers && !state.vwLoading) { state.vwLoading = true; sqlJson('viewers_list()').then(x=>{ state.viewers = x||[]; if (current()==='control') render(); }).catch(()=>{ state.viewers = []; }); }
   if (!state.usage && !state.usLoading) { state.usLoading = true; sqlJson('db_usage()').then(x=>{ state.usage = (Array.isArray(x)?x[0]:x)||{}; if (current()==='control') render(); }).catch(()=>{ state.usage = {}; }); }
-  const s=D.settings||[], keys=[...new Set([...s.map(x=>x.key), 'أحدث إصدار', 'رابط التحديث'])].filter(k=>k!=='وضع الصيانة' && k!=='رسالة الصيانة' && k!=='عدد الأيام المسموح الرجوع لها للمدراء');
+  const s=D.settings||[], keys=[...new Set([...s.map(x=>x.key), 'خصم المصاريف النقدية من النقد قبل الإيداع', 'أحدث إصدار', 'رابط التحديث'])].filter(k=>k!=='وضع الصيانة' && k!=='رسالة الصيانة' && k!=='عدد الأيام المسموح الرجوع لها للمدراء');
   const val=(van,k)=>{const r=s.find(x=>(x.van_no??null)===van && x.key===k);return r?r.value:'';};
   const NUM_SET={'عدد الأيام المسموح الرجوع لها':{type:'number',min:0,max:60,hint:'أيام'},'وزن السلة':{type:'number',min:0,step:'0.01',hint:'كغم'},'رقم بداية الفاتورة':{type:'number',min:1,hint:''},'رقم واتساب الإدارة':{type:'text',hint:'9627…'},'أحدث إصدار':{type:'text',hint:'مثل 2.4',w:90},'رابط التحديث':{type:'text',hint:'https://…/cashvan-2.4.apk',w:260}};
   const choice=(van,k)=>{const v=val(van,k);
@@ -1687,6 +1713,7 @@ function viewControl(){
       ${maintOn()?'<button class="btn" type="button" data-act="maintOff">▶ استئناف الإرسال</button>':'<button class="btn sec" type="button" data-act="maintOn" style="border-color:var(--bad);color:var(--bad)">⏸ إيقاف الإرسال من التطبيقات</button>'}</div>
     <div class="sec-head"><div><h2>التحكم بالتطبيقات</h2><p>«العام» يطبَّق على كل السيارات، وعمود السيارة يغلبه لتلك السيارة فقط. تصل للتطبيقات عند مزامنتها. يمكن تعديل كل سيارة وحدها من تبويب «السيارات» أيضاً.</p>
     <p><b>أحدث إصدار</b> و<b>رابط التحديث</b>: اكتب رقم الإصدار الجديد ورابط ملف APK على GitHub. كل هاتف يرى «تحديث جديد» عند مزامنته ويثبّته بضغطة. اتركهما فارغين إذا لا يوجد تحديث.</p>
+    <p><b>خصم المصاريف النقدية من النقد قبل الإيداع</b>: الأصل «لا» — المصاريف تدخل الأرباح والخسائر فقط ولا تُنقص ما يجب أن تودعه السيارة. اختر «نعم» إذا كان السائق يدفع المصاريف من نقد التسديدات.</p>
     <p><b>عدد الأيام المسموح الرجوع لها</b>: رقم واحد يحكم كل ما يدخله السائق بتاريخ سابق — فواتير ومشتريات وتحويلات ومصاريف وإيداعات. قاعدة البيانات ترفض أي إدخال من التطبيق أقدم من هذا العدد. اللوحة (أنت) غير مقيّدة به.</p></div></div>
     ${keys.length?`<div class="tablebox"><div class="set-grid" style="grid-template-columns:minmax(0,2fr) repeat(${vs.length+1},minmax(90px,1fr))"><div class="hd">الإعداد</div><div class="hd">العام</div>${vs.map(v=>`<div class="hd">${esc(vanName(v))}</div>`).join('')}
       ${keys.map(k=>`<div>${esc(k)}</div><div>${choice(null,k)}</div>${vs.map(v=>`<div>${choice(v,k)}</div>`).join('')}`).join('')}</div></div>`:'<div class="panel empty">لا إعدادات.</div>'}
@@ -2159,7 +2186,8 @@ function cfStatements(X, P){
   const dRecv = recvClose - recvOpen, dInv = cl.v - n(I.opening_value);
   const netProfit = grossP - expenses;
   const indirect = netProfit - dRecv - dInv + (P.purchasesCash ? 0 : n(PU.value)) - (n(TR.out) - n(TR.in));
-  const cashbookEnd = n(CB.opening) + n(R.cash) + n(R.cheques_received) - n(EX.cash) - n(DP.total);
+  const exCash = CB.expenses_from_cash!==undefined ? n(CB.expenses_from_cash) : n(EX.cash);
+  const cashbookEnd = n(CB.opening) + n(R.cash) + n(R.cheques_received) - exCash - n(DP.total);
   const row = (k, v, t, cls) => ({k, v, _t:t||'jd', cls});
   const S = {};
   S.periodic = { rows: [
@@ -2198,7 +2226,7 @@ function cfStatements(X, P){
   S.cashbook = { rows: [
       row('رصيد أول المدة خارج البنك (غير مودع)', CB.opening),
       row('+ مقبوضات نقدية وسندات', R.cash), row('+ شيكات مستلمة', R.cheques_received),
-      row('− مصاريف نقدية', -n(EX.cash)), row('− إيداعات نقدية', -n(DP.cash)), row('− إيداعات شيكات', -n(DP.cheque)),
+      row(exCash<n(EX.cash)-0.005?'− مصاريف دُفعت من نقد السيارات':'− مصاريف نقدية', -exCash), row('− إيداعات نقدية', -n(DP.cash)), row('− إيداعات شيكات', -n(DP.cheque)),
       row('= ما يجب أن يكون خارج البنك آخر المدة', cashbookEnd, 'jd', 'total'),
       row('ما تقوله اللوحة الآن (غير مودع)', CB.closing), row('   منه نقد', CB.closing_cash), row('   منه شيكات', CB.closing_cheques),
       row(Math.abs(cashbookEnd-n(CB.closing))>1?'فرق يحتاج تفسيراً':'متطابق ✓', cashbookEnd-n(CB.closing), 'jd', Math.abs(cashbookEnd-n(CB.closing))>1?'warn':''),
@@ -2335,6 +2363,7 @@ main.addEventListener('click', async e=>{
   if (ds.act==='newInvoice') return invoiceForm();
   if (ds.act==='newPurchase') return purchaseForm();
   if (ds.act==='newCollection') return collectionForm();
+  if (ds.act==='autoTransfers') return autoTransfers(ds.asof);
   if (ds.act==='newTransfer') return transferForm();
   if (ds.act==='newCustomer') return customerForm();
   if (ds.act==='newItem') return itemForm();
