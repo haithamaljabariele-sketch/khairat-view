@@ -704,7 +704,7 @@ function itemForm(it){
 const EXPENSE_CATS = ['وقود','صيانة السيارة','رواتب وأجور','ثلج وتغليف','إيجار','كهرباء ومياه','اتصالات','ضيافة','أخرى'];
 const KIND_LABEL = {purchase:'فاتورة مشتريات', expense:'إيصال مصروف', deposit:'إيصال إيداع بنكي', invoice:'إيصال بيع', collection:'سند قبض', other:'أخرى'};
 const DEP_KIND = {cash:'إيداع نقدي', cheque:'إيداع شيكات'};
-const photoField = (req) => `<div class="field" style="grid-column:1/-1"><label for="f_photo">صورة الإيصال ${req?'(مطلوبة)':'(اختيارية — يمكن إضافتها لاحقاً)'}</label><input id="f_photo" name="photo" type="file" accept="image/*" capture="environment"><img id="f_prev" alt="" hidden style="max-height:160px;max-width:100%;border-radius:8px;border:1px solid var(--line);margin-top:6px;object-fit:contain"></div>`;
+const photoField = (req) => `<div class="field" style="grid-column:1/-1"><label for="f_photo">صورة الإيصال ${req?'(مطلوبة)':'(اختيارية — يمكن إضافتها لاحقاً)'}</label><input id="f_photo" name="photo" type="file" accept="image/*"><img id="f_prev" alt="" hidden style="max-height:160px;max-width:100%;border-radius:8px;border:1px solid var(--line);margin-top:6px;object-fit:contain"></div>`;
 function wirePreview(){
   const f = $('#f_photo'); if (!f) return;
   f.onchange = () => { const p = $('#f_prev'); const file = f.files[0]; if (!file) { p.hidden = true; return; } p.src = URL.createObjectURL(file); p.hidden = false; };
@@ -888,8 +888,8 @@ function statementHtml(st){
       ${r.rows.map(x=>`<tr><td style="color:#111">${x.i}</td><td style="color:#111">${d(x.day)}</td><td style="color:#111">${esc(x.kind)}</td><td style="color:#111">${esc(x.ref)}</td><td class="n" style="color:#111">${num(x.debit)?jd(x.debit):''}</td><td class="n" style="color:#111">${num(x.credit)?jd(x.credit):''}</td><td class="n" style="color:${x.bal<0?'#b4372f':'#111'}">${jd(x.bal)}</td></tr>`).join('')}
       <tr><td colspan="4" style="background:#eef2f0;color:#111;font-weight:700">المجموع</td><td class="n" style="background:#eef2f0;color:#111;font-weight:700">${jd(sum(r.rows,'debit'))}</td><td class="n" style="background:#eef2f0;color:#111;font-weight:700">${jd(sum(r.rows,'credit'))}</td><td class="n" style="background:#eef2f0;color:#111;font-weight:700">${jd(r.closing)}</td></tr>
     </tbody></table>
-    ${num(cu.cheques_pending)?`<p style="font-size:12px;margin:8px 0 0">شيكات برسم التحصيل: <b>${jd(cu.cheques_pending)}</b> · صافي الذمة بعد تحصيل الشيكات: <b>${jd(r.closing - (num(cu.cheques_pending)||0))}</b></p>`:''}
-    <p style="font-size:13px;margin:10px 0 0">الرصيد المستحق كما في ${d(st.to)}: <b>${jd(r.closing)} د.ا</b></p>
+    ${num(cu.cheques_pending)?`<p style="font-size:12px;margin:8px 0 0">شيكات برسم التحصيل (مخصومة في الكشف أعلاه كتسديد): <b>${jd(cu.cheques_pending)}</b> · الذمة قبل تحصيل الشيكات: <b>${jd(r.closing + (num(cu.cheques_pending)||0))}</b> · بعد تحصيلها: <b>${jd(r.closing)}</b></p>`:''}
+    <p style="font-size:13px;margin:10px 0 0">الرصيد المستحق كما في ${d(st.to)}: <b>${jd(r.closing + (num(cu.cheques_pending)||0))} د.ا</b>${num(cu.cheques_pending)?` <span style="font-size:11px;color:#555">(منها ${jd(cu.cheques_pending)} شيكات لم تُحصّل بعد)</span>`:''}</p>
   </div>`;
 }
 async function exportStatement(){
