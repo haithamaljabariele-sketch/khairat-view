@@ -720,7 +720,7 @@ function expenseForm(m){
       <div class="field"><label for="f_note">ملاحظة</label><input id="f_note" name="note" value="${esc(m&&m.note||'')}"></div>
       ${m?'':photoField(false)}
     </div>
-    <p class="muted" style="margin:0;font-size:.8rem">المصروف النقدي من سيارة يُنقص ما عليها إيداعه في البنك.</p>
+    <p class="muted" style="margin:0;font-size:.8rem">المصروف يدخل الأرباح والخسائر فقط؛ لا يُنقص ما على السيارة إيداعه إلا إذا فعّلت «خصم المصاريف النقدية من النقد قبل الإيداع» في التحكم بالتطبيقات.</p>
     ${m?'<div class="field"><label for="f_reason">سبب التعديل (مطلوب)</label><input id="f_reason" name="reason"></div>':''}`,
     async fd => {
       if (!fd.get('category')) throw {message:'ERROR: اختر نوع المصروف'};
@@ -865,10 +865,13 @@ function receiptView(inv){
 }
 
 // ---- customer statement, printed like the Excel one
+// the running balance is the customer's debt «قبل تحصيل الشيكات»: a cheque counts only once collected
 function statementRows(st){
-  let run = num(st.customer && st.customer.opening) || 0;
+  const cu = st.customer || {};
+  const op = cu.opening_due !== undefined && cu.opening_due !== null ? num(cu.opening_due) : num(cu.opening);
+  let run = op || 0;
   const rows = (st.rows||[]).map((s,i)=>{ run += (num(s.debit)||0)-(num(s.credit)||0); return {...s, i:i+1, bal:run}; });
-  return {opening: num(st.customer && st.customer.opening) || 0, rows, closing: run};
+  return {opening: op || 0, rows, closing: run};
 }
 function statementHtml(st){
   const cu = st.customer || {}; const r = statementRows(st);
@@ -884,12 +887,12 @@ function statementHtml(st){
       <tr><td style="background:#eef2f0;color:#111;font-weight:600">رقم العميل</td><td style="color:#111">${esc(cu.number??'')}</td><td style="background:#eef2f0;color:#111;font-weight:600">نوع العميل</td><td style="color:#111">${esc(cu.kind||'')}</td><td style="background:#eef2f0;color:#111;font-weight:600">تاريخ الطباعة</td><td style="color:#111">${d(today)}</td><td style="background:#eef2f0;color:#111;font-weight:600">عدد الحركات</td><td style="color:#111">${r.rows.length}</td></tr>
     </tbody></table>
     <table style="font-size:12px"><thead><tr>${['م','التاريخ','نوع الحركة','البيان / رقم الفاتورة','مدين','دائن','الرصيد'].map(h=>`<th style="background:#1d6b58;color:#fff;position:static">${h}</th>`).join('')}</tr></thead><tbody>
-      <tr><td colspan="6" style="color:#111;font-weight:600">الرصيد السابق المدور كما في ${d(st.from)}</td><td class="n" style="color:#111;font-weight:600">${jd(r.opening)}</td></tr>
+      <tr><td colspan="6" style="color:#111;font-weight:600">الرصيد السابق المدور كما في ${d(st.from)} (قبل تحصيل الشيكات)</td><td class="n" style="color:#111;font-weight:600">${jd(r.opening)}</td></tr>
       ${r.rows.map(x=>`<tr><td style="color:#111">${x.i}</td><td style="color:#111">${d(x.day)}</td><td style="color:#111">${esc(x.kind)}</td><td style="color:#111">${esc(x.ref)}</td><td class="n" style="color:#111">${num(x.debit)?jd(x.debit):''}</td><td class="n" style="color:#111">${num(x.credit)?jd(x.credit):''}</td><td class="n" style="color:${x.bal<0?'#b4372f':'#111'}">${jd(x.bal)}</td></tr>`).join('')}
       <tr><td colspan="4" style="background:#eef2f0;color:#111;font-weight:700">المجموع</td><td class="n" style="background:#eef2f0;color:#111;font-weight:700">${jd(sum(r.rows,'debit'))}</td><td class="n" style="background:#eef2f0;color:#111;font-weight:700">${jd(sum(r.rows,'credit'))}</td><td class="n" style="background:#eef2f0;color:#111;font-weight:700">${jd(r.closing)}</td></tr>
     </tbody></table>
-    ${num(cu.cheques_pending)?`<p style="font-size:12px;margin:8px 0 0">شيكات برسم التحصيل (مخصومة في الكشف أعلاه كتسديد): <b>${jd(cu.cheques_pending)}</b> · الذمة قبل تحصيل الشيكات: <b>${jd(r.closing + (num(cu.cheques_pending)||0))}</b> · بعد تحصيلها: <b>${jd(r.closing)}</b></p>`:''}
-    <p style="font-size:13px;margin:10px 0 0">الرصيد المستحق كما في ${d(st.to)}: <b>${jd(r.closing + (num(cu.cheques_pending)||0))} د.ا</b>${num(cu.cheques_pending)?` <span style="font-size:11px;color:#555">(منها ${jd(cu.cheques_pending)} شيكات لم تُحصّل بعد)</span>`:''}</p>
+    ${num(cu.cheques_pending)?`<p style="font-size:12px;margin:8px 0 0">منها شيكات لم تُحصّل بعد: <b>${jd(cu.cheques_pending)}</b> · الذمة بعد تحصيلها: <b>${jd(r.closing - (num(cu.cheques_pending)||0))}</b></p>`:''}
+    <p style="font-size:13px;margin:10px 0 0">الرصيد المستحق كما في ${d(st.to)}: <b>${jd(r.closing)} د.ا</b></p>
   </div>`;
 }
 async function exportStatement(){
@@ -1339,7 +1342,8 @@ function rangeOf(k){
   if (k==='this_month') return [d(new Date(y,m,1,12)), state.day];
   if (k==='last_month') return [d(new Date(y,m-1,1,12)), d(new Date(y,m,0,12))];
   if (k==='this_year') return [d(new Date(y,0,1,12)), state.day];
-  return [D.first_day || state.day, state.day];
+  const f0 = D.first_day || state.day;
+  return [f0 > state.day ? state.day : f0, state.day];   // a day before the books started: never ask for an empty, reversed range
 }
 let R = null;   // last report result
 const rep = { range:'this_month', from:null, to:null, vans:[], sections:['summary','daily','by_customer','by_item'], options:{}, preset:null };
@@ -1540,26 +1544,61 @@ async function exportHtml(){
 }
 
 // ================================================================ customers (as of the chosen day)
+// customers owing less than 50 JD with no sale and no payment for 30 days or more
+function smallDebts(rows, asOf){
+  const t0 = new Date(asOf+'T12:00:00');
+  const age = d => d ? Math.round((t0 - new Date(d+'T12:00:00'))/86400000) : 9999;
+  return rows.map(r=>({...r, idle: Math.min(age(r.last_sale), age(r.last_payment))}))
+    .filter(r => num(r.total_due) > 0.005 && num(r.total_due) < 50 && r.idle >= 30)
+    .sort((a,b)=>b.idle-a.idle);
+}
+async function exportSmallDebtsXlsx(){
+  if (typeof XLSX === 'undefined') { toast('مكتبة Excel لم تُحمَّل — تأكد من الإنترنت وأعد المحاولة'); return; }
+  const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
+  const rows = smallDebts((D.balances||[]).filter(r=>r.van_no==state.van), state.day);
+  const aoa=[['#','العميل','السيارة','الذمة','آخر فاتورة','آخر دفعة','أيام بلا حركة'], ...rows.map(r=>[r.number, r.name, vanName(r.van_no), num(r.total_due), r.last_sale||'', r.last_payment||'', r.idle===9999?'':r.idle]),
+    ['','الاجمالي','',num(sum(rows,'total_due')),'','','']];
+  const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:5},{wch:30},{wch:12},{wch:12},{wch:12},{wch:12},{wch:14}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'ذمم صغيرة راكدة');
+  const out=XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  try { await dl.save({filename:`ذمم صغيرة راكدة ${vanName(state.van)} ${state.day}.xlsx`, data:new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
+}
 function viewDebts(){
   const v=state.van, q=(state.q||'').trim();
-  const rows=(D.balances||[]).filter(r=>r.van_no==v && (!q || r.name.includes(q)) && (state.showAllCust || num(r.total_due)!==0 || r.active!==false));
-  const over=rows.filter(r=>num(r.over_limit)>0);
+  const rowsAll=(D.balances||[]).filter(r=>r.van_no==v && (!q || r.name.includes(q)) && (state.showAllCust || num(r.total_due)!==0 || r.active!==false));
+  const smallIds=new Set(smallDebts(rowsAll, state.day).map(r=>r.customer_id));
+  const rows=rowsAll.filter(r=>!smallIds.has(r.customer_id));   // the small idle debts live in their own table at the bottom
+  const over=rowsAll.filter(r=>num(r.over_limit)>0);
   const seg=`<div class="seg" role="group" aria-label="السيارة">${vanNos().map(x=>`<button type="button" data-van="${x}" aria-pressed="${v==x}">${esc(vanName(x))}</button>`).join('')}</div>`;
   const st=state.stmt, cu=st&&st.customer;
   return `<section class="view">
     <div class="sec-head"><div><h2>العملاء والذمم حتى ${esc(dayName(state.day))}</h2><p>الرصيد من أول يوم في الدفاتر حتى التاريخ المختار. الدين موزّع حسب عمره: الأقدم يُسدَّد أولاً. كل سيارة ترى عملاءها فقط في التطبيق.</p></div>
       <div class="controls">${seg}<input type="search" id="custQ" placeholder="بحث باسم العميل" value="${esc(q)}" aria-label="بحث باسم العميل"><button class="btn" type="button" data-act="newCustomer">+ عميل</button></div></div>
     <div class="kpis five panel">
-      <div class="kpi"><div class="label">مجموع الذمم قبل تحصيل الشيكات</div><div class="value">${jd(sum(rows,'total_due'))}</div><div class="sub">الشيكات ما زالت ديناً</div></div>
-      <div class="kpi"><div class="label">شيكات غير محصلة</div><div class="value">${jd(sum(rows,'cheques_pending'))}</div></div>
-      <div class="kpi"><div class="label">مجموع الذمم بعد تحصيل الشيكات</div><div class="value">${jd(sum(rows,'closing'))}</div><div class="sub">إذا حُصّلت كل الشيكات</div></div>
-      <div class="kpi"><div class="label">أكثر من 30 يوماً</div><div class="value">${jd(sum(rows,r=>(num(r.age_31_60)||0)+(num(r.age_60p)||0)))}</div></div>
+      <div class="kpi"><div class="label">مجموع الذمم قبل تحصيل الشيكات</div><div class="value">${jd(sum(rowsAll,'total_due'))}</div><div class="sub">الشيكات ما زالت ديناً</div></div>
+      <div class="kpi"><div class="label">شيكات غير محصلة</div><div class="value">${jd(sum(rowsAll,'cheques_pending'))}</div></div>
+      <div class="kpi"><div class="label">مجموع الذمم بعد تحصيل الشيكات</div><div class="value">${jd(sum(rowsAll,'closing'))}</div><div class="sub">إذا حُصّلت كل الشيكات</div></div>
+      <div class="kpi"><div class="label">أكثر من 30 يوماً</div><div class="value">${jd(sum(rowsAll,r=>(num(r.age_31_60)||0)+(num(r.age_60p)||0)))}</div></div>
       <div class="kpi"><div class="label">فوق السقف</div><div class="value">${over.length}</div><div class="sub">عميل</div></div>
     </div>
+    ${(()=>{ const old=rows.map(r=>({...r, over30:(num(r.age_31_60)||0)+(num(r.age_60p)||0)})).filter(r=>r.over30>0.005).sort((a,b)=>b.over30-a.over30);
+      if (!old.length) return '';
+      return `<div class="sec-head" style="margin-top:8px"><div><h3>ذمم أقدم من 30 يوماً</h3><p>العملاء الذين عليهم دين مضى عليه أكثر من 30 يوماً. الأقدم يُسدَّد أولاً، فما يظهر هنا هو ما بقي بعد كل تسديداتهم.</p></div><span class="controls">${copyBtn('tOld')}<button class="btn sec" type="button" data-act="oldXlsx">تنزيل Excel</button></span></div>
+      <div class="tablebox"><table id="tOld"><thead><tr><th class="n">#</th><th>العميل</th><th class="n">31–60 يوماً</th><th class="n">أكثر من 60</th><th class="n">أقدم من 30 يوماً</th><th class="n">كل ذمته</th><th>آخر دفعة</th><th>آخر فاتورة</th><th class="noexp"></th></tr></thead><tbody>
+      ${old.map(r=>`<tr class="click" data-cust="${r.customer_id}"><td class="n">${r.number}</td><td>${esc(r.name)}</td><td class="n">${num(r.age_31_60)?`<span class="pill warn">${jd(r.age_31_60)}</span>`:''}</td><td class="n">${num(r.age_60p)?`<span class="pill bad">${jd(r.age_60p)}</span>`:''}</td><td class="n"><b>${jd(r.over30)}</b></td><td class="n">${jd(r.total_due)}</td><td>${r.last_payment||'—'}</td><td>${r.last_sale||'—'}</td><td class="noexp keep"><button type="button" class="icon-btn" data-editcust="${r.customer_id}">تعديل</button></td></tr>`).join('')}
+      <tr class="total"><td></td><td>الاجمالي · ${old.length} عميل</td><td class="n">${jd(sum(old,'age_31_60'))}</td><td class="n">${jd(sum(old,'age_60p'))}</td><td class="n">${jd(sum(old,'over30'))}</td><td class="n">${jd(sum(old,'total_due'))}</td><td></td><td></td><td class="noexp"></td></tr>
+      </tbody></table></div>`; })()}
     ${rows.length?`<div class="tablebox"><table id="tDebt"><thead><tr><th class="n">#</th><th>العميل</th><th class="n">بعد تحصيل الشيكات</th><th class="n">شيكات</th><th class="n">قبل تحصيل الشيكات</th><th class="n">0–7</th><th class="n">8–15</th><th class="n">16–30</th><th class="n">31–60</th><th class="n">+60</th><th class="n">السقف</th><th>الحالة</th><th>نوع العميل</th><th>آخر دفعة</th><th class="noexp"></th></tr></thead><tbody>
     ${rows.map(r=>`<tr class="click${state.cust==r.customer_id?' sel':''}${r.active===false?' gone':''}" data-cust="${r.customer_id}"><td class="n">${r.number}</td><td>${esc(r.name)}</td><td class="n${ncls(r.closing)}">${jd(r.closing)}</td><td class="n">${num(r.cheques_pending)?jd(r.cheques_pending):'—'}</td><td class="n"><b>${jd(r.total_due)}</b></td><td class="n">${num(r.age_0_7)?jd(r.age_0_7):''}</td><td class="n">${num(r.age_8_15)?jd(r.age_8_15):''}</td><td class="n">${num(r.age_16_30)?jd(r.age_16_30):''}</td><td class="n">${num(r.age_31_60)?`<span class="pill warn">${jd(r.age_31_60)}</span>`:''}</td><td class="n">${num(r.age_60p)?`<span class="pill bad">${jd(r.age_60p)}</span>`:''}</td><td class="n">${r.credit_limit===null?'—':jd(r.credit_limit)}</td><td class="keep">${num(r.over_limit)>0?`<span class="pill bad">فوق السقف ${jd(r.over_limit)}</span>`:(r.credit_limit===null?'':'<span class="pill good">ضمن السقف</span>')}</td><td class="keep"><select data-kind="${r.customer_id}" aria-label="نوع العميل" style="padding:2px 6px;font-size:.8rem">${opts(['ذمم','نقدي'], r.kind)}</select></td><td>${r.last_payment||'—'}</td><td class="noexp keep"><button type="button" class="icon-btn" data-editcust="${r.customer_id}">تعديل</button></td></tr>`).join('')}
     <tr class="total"><td></td><td>الاجمالي</td><td class="n">${jd(sum(rows,'closing'))}</td><td class="n">${jd(sum(rows,'cheques_pending'))}</td><td class="n">${jd(sum(rows,'total_due'))}</td><td class="n">${jd(sum(rows,'age_0_7'))}</td><td class="n">${jd(sum(rows,'age_8_15'))}</td><td class="n">${jd(sum(rows,'age_16_30'))}</td><td class="n">${jd(sum(rows,'age_31_60'))}</td><td class="n">${jd(sum(rows,'age_60p'))}</td><td></td><td></td><td></td><td></td><td class="noexp"></td></tr>
     </tbody></table></div>`:`<div class="panel empty">${!q?'لا يوجد عملاء لهذه السيارة بعد. أضفهم من زر «+ عميل» — يظهرون في تطبيق هذه السيارة فقط.':'لا نتائج.'}</div>`}
+    ${(()=>{ const small=smallDebts(rowsAll, state.day);
+      if (!small.length) return '';
+      return `<div class="sec-head" style="margin-top:8px"><div><h3>ذمم صغيرة راكدة (أقل من 50 د.ا بلا حركة 30 يوماً)</h3><p>عملاء عليهم أقل من 50 ديناراً ولم يشتروا ولم يدفعوا منذ 30 يوماً أو أكثر — غالباً باقي فاتورة نُسي. لا يظهرون في الجدولين أعلاه، ويعودون إليهما تلقائياً عند أول فاتورة أو دفعة جديدة.</p></div><span class="controls">${copyBtn('tSmall')}<button class="btn sec" type="button" data-act="smallXlsx">تنزيل Excel</button></span></div>
+      <div class="tablebox"><table id="tSmall"><thead><tr><th class="n">#</th><th>العميل</th><th class="n">الذمة</th><th>آخر فاتورة</th><th>آخر دفعة</th><th class="n">أيام بلا حركة</th><th class="noexp"></th></tr></thead><tbody>
+      ${small.map(r=>`<tr class="click" data-cust="${r.customer_id}"><td class="n">${r.number}</td><td>${esc(r.name)}</td><td class="n"><b>${jd(r.total_due)}</b></td><td>${r.last_sale||'—'}</td><td>${r.last_payment||'—'}</td><td class="n">${r.idle}</td><td class="noexp keep"><button type="button" class="icon-btn" data-editcust="${r.customer_id}">تعديل</button></td></tr>`).join('')}
+      <tr class="total"><td></td><td>الاجمالي · ${small.length} عميل</td><td class="n">${jd(sum(small,'total_due'))}</td><td></td><td></td><td></td><td class="noexp"></td></tr>
+      </tbody></table></div>`; })()}
     ${cu?`<div><div class="sec-head"><div><h2>كشف حساب: ${esc(cu.name)}</h2><p>اختر الفترة. الرصيد الافتتاحي محسوب من كل ما قبلها.</p></div><span class="controls"><span class="toggle">من <input type="date" id="stFrom" value="${esc(st.from)}"></span><span class="toggle">إلى <input type="date" id="stTo" value="${esc(st.to)}"></span><button class="btn" type="button" data-act="stPrint">تنزيل للطباعة / PDF</button></span></div>
       <div style="overflow-x:auto">${statementHtml(st)}</div></div>`:'<p class="note">اضغط على أي عميل لعرض كشف حسابه بين تاريخين، مع شعار الشركة، وتنزيله للطباعة. «نقدي» = التطبيق لا يسمح له إلا بفاتورة نقدية.</p>'}
   </section>`;
@@ -1624,14 +1663,52 @@ function viewTransfers(){
 }
 
 function viewCheques(){
-  const c=D.cheques||[];
+  const c=D.cheques||[], today=state.day;
+  const pend=c.filter(x=>x.status==='برسم التحصيل').sort((a,b)=>String(a.due_on).localeCompare(String(b.due_on)));
+  const ret=c.filter(x=>x.status==='مرتجع'), done=c.filter(x=>x.status==='محصل').sort((a,b)=>String(b.collected_on||b.due_on).localeCompare(String(a.collected_on||a.due_on)));
+  const days=x=>Math.round((new Date(x.due_on+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
+  const sel=x=>`<select data-cheque="${x.id}" aria-label="حالة الشيك">${opts(['برسم التحصيل','محصل','مرتجع'],x.status)}</select>`;
+  const tbl=(id,rows,extra)=>`<div class="tablebox"><table id="${id}"><thead><tr><th>رقم الشيك</th><th>العميل</th><th>السيارة</th><th class="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th>${extra?'<th>'+extra+'</th>':''}<th>الحالة</th><th>تاريخ التحصيل</th></tr></thead><tbody>
+    ${rows.map(x=>`<tr><td>${esc(x.cheque_no)}</td><td>${esc(x.customer_name)}</td><td>${x.van_no?vanPill(x.van_no):''}</td><td class="n">${jd(x.amount)}</td><td>${x.received_on}</td><td>${x.due_on}</td>${extra?`<td>${days(x)<0?`<span class="pill bad">متأخر ${-days(x)} يوم</span>`:days(x)===0?'<span class="pill warn">اليوم</span>':`بعد ${days(x)} يوم`}</td>`:''}<td>${sel(x)}</td><td>${x.collected_on||'—'}</td></tr>`).join('')}
+    <tr class="total"><td colspan="3">الاجمالي · ${rows.length} شيك</td><td class="n">${jd(sum(rows,'amount'))}</td><td colspan="${extra?5:4}"></td></tr>
+    </tbody></table></div>`;
   return `<section class="view">
-    <div class="sec-head"><div><h2>الشيكات</h2><p>يبقى الشيك «برسم التحصيل» على العميل حتى تغيّر حالته إلى «محصل». الشيك المرتجع يعود ديناً على العميل.</p></div><button class="btn" type="button" data-act="newCollection">+ سند بشيك</button></div>
-    ${c.length?`<div class="tablebox"><table><thead><tr><th>رقم الشيك</th><th>العميل</th><th>السيارة</th><th class="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th><th>الحالة</th><th>تاريخ التحصيل</th></tr></thead><tbody>
-    ${c.map(x=>`<tr><td>${esc(x.cheque_no)}</td><td>${esc(x.customer_name)}</td><td>${x.van_no?vanPill(x.van_no):''}</td><td class="n">${jd(x.amount)}</td><td>${x.received_on}</td><td>${x.due_on}</td><td><select data-cheque="${x.id}" aria-label="حالة الشيك">${opts(['برسم التحصيل','محصل','مرتجع'],x.status)}</select></td><td>${x.collected_on||'—'}</td></tr>`).join('')}
-    ${Object.entries(by(c, x=>x.status)).map(([st,g])=>`<tr class="total"><td colspan="3">مجموع «${esc(st)}» · ${g.length} شيك</td><td class="n">${jd(sum(g,'amount'))}</td><td colspan="4"></td></tr>`).join('')}
-    </tbody></table></div>`:`<div class="panel empty">لا شيكات.</div>`}
+    <div class="sec-head"><div><h2>الشيكات</h2><p>يبقى الشيك «برسم التحصيل» على العميل حتى تاريخ استحقاقه، ثم يُعدّ «محصل» تلقائياً بذلك التاريخ. إذا ردّه البنك غيّر حالته إلى «مرتجع» فيعود ديناً على العميل.</p></div>
+      <span class="controls"><button class="btn sec" type="button" data-act="chqXlsx">تنزيل Excel</button><button class="btn" type="button" data-act="newCollection">+ سند بشيك</button></span></div>
+    <div class="sec-head" style="margin-top:4px"><h3>شيكات لم تُحصّل بعد (برسم التحصيل)</h3><span class="controls">${pend.length?copyBtn('tChqPend'):''}</span></div>
+    ${pend.length?tbl('tChqPend',pend,'يستحق'):'<div class="panel empty">لا شيكات بانتظار التحصيل.</div>'}
+    ${ret.length?`<div class="sec-head" style="margin-top:14px"><h3>شيكات مرتجعة</h3><span class="controls">${copyBtn('tChqRet')}</span></div>${tbl('tChqRet',ret,'')}`:''}
+    <div class="sec-head" style="margin-top:14px"><h3>شيكات محصّلة</h3><span class="controls">${done.length?copyBtn('tChqDone'):''}</span></div>
+    ${done.length?tbl('tChqDone',done,''):'<div class="panel empty">لا شيكات محصّلة بعد.</div>'}
   </section>`;
+}
+// Excel of the customers whose debt is older than 30 days (the van shown on the page)
+async function exportOldDebtsXlsx(){
+  if (typeof XLSX === 'undefined') { toast('مكتبة Excel لم تُحمَّل — تأكد من الإنترنت وأعد المحاولة'); return; }
+  const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
+  const rows=(D.balances||[]).filter(r=>r.van_no==state.van).map(r=>({...r, over30:(num(r.age_31_60)||0)+(num(r.age_60p)||0)})).filter(r=>r.over30>0.005).sort((a,b)=>b.over30-a.over30);
+  const H=['#','العميل','السيارة','31–60 يوماً','أكثر من 60 يوماً','أقدم من 30 يوماً','كل الذمة','شيكات غير محصلة','آخر دفعة','آخر فاتورة'];
+  const aoa=[H, ...rows.map(r=>[r.number, r.name, vanName(r.van_no), num(r.age_31_60), num(r.age_60p), r.over30, num(r.total_due), num(r.cheques_pending), r.last_payment||'', r.last_sale||'']),
+    ['','الاجمالي','',num(sum(rows,'age_31_60')),num(sum(rows,'age_60p')),num(sum(rows,'over30')),num(sum(rows,'total_due')),num(sum(rows,'cheques_pending')),'','']];
+  const ws=XLSX.utils.aoa_to_sheet(aoa); ws['!cols']=[{wch:5},{wch:30},{wch:12},{wch:12},{wch:14},{wch:16},{wch:12},{wch:14},{wch:12},{wch:12}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'أقدم من 30 يوماً');
+  const out=XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  try { await dl.save({filename:`ذمم أقدم من 30 يوماً ${vanName(state.van)} ${state.day}.xlsx`, data:new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
+}
+// Excel of the cheques: one sheet for the uncollected ones, one for the rest
+async function exportChequesXlsx(){
+  if (typeof XLSX === 'undefined') { toast('مكتبة Excel لم تُحمَّل — تأكد من الإنترنت وأعد المحاولة'); return; }
+  const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
+  const c=D.cheques||[], H=['رقم الشيك','العميل','السيارة','المبلغ','تاريخ الاستلام','تاريخ الاستحقاق','الحالة','تاريخ التحصيل'];
+  const row=x=>[x.cheque_no, x.customer_name, vanName(x.van_no), num(x.amount), x.received_on, x.due_on, x.status, x.collected_on||''];
+  const pend=c.filter(x=>x.status==='برسم التحصيل').sort((a,b)=>String(a.due_on).localeCompare(String(b.due_on)));
+  const rest=c.filter(x=>x.status!=='برسم التحصيل');
+  const sheet=rows=>{ const ws=XLSX.utils.aoa_to_sheet([H, ...rows.map(row), ['الاجمالي','','',num(sum(rows,'amount')),'','','','']]); ws['!cols']=[{wch:12},{wch:28},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:14}]; return ws; };
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet(pend), 'لم تُحصّل بعد');
+  XLSX.utils.book_append_sheet(wb, sheet(rest), 'محصّلة ومرتجعة');
+  const out=XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  try { await dl.save({filename:`شيكات خيرات العز ${state.day}.xlsx`, data:new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
 }
 
 function viewItems(){
@@ -2437,6 +2514,9 @@ main.addEventListener('click', async e=>{
   }
   if (ds.act==='runReport') return runReport();
   if (ds.act==='xlsx') return exportXlsx();
+  if (ds.act==='chqXlsx') return exportChequesXlsx();
+  if (ds.act==='oldXlsx') return exportOldDebtsXlsx();
+  if (ds.act==='smallXlsx') return exportSmallDebtsXlsx();
   if (ds.act==='html') return exportHtml();
   if (ds.act==='savePreset') {
     openModal(`<h2>حفظ التقرير</h2><div class="field"><label for="f_pn">اسم التقرير</label><input id="f_pn" name="name" value="${esc(rep.preset && !BUILTIN.some(b=>b.name===rep.preset) ? rep.preset : '')}" placeholder="مثال: تقرير الأسبوع للسيارة 2"></div><p class="muted" style="margin:0;font-size:.82rem">يُحفظ: نوع الفترة (${esc((RANGES.find(r=>r[0]===rep.range)||[,'فترة مخصصة'])[1])})، السيارات، الأقسام والخيارات.</p>`,
