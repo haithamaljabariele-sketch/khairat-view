@@ -345,6 +345,7 @@ let API = {
   day: d => sqlJson(`dashboard_data(${lit(d)}::date)`),
   report: (f, t, vs, secs, opts) => sqlJson(`report_data(${lit(f)}::date, ${lit(t)}::date, ${vansArr(vs)}, array[${secs.map(x=>lit(x)).join(',')}]::text[], ${lit(JSON.stringify(opts||{}))}::jsonb)`),
   statement: (id, f, t) => sqlJson(`statement_for(${Number(id)}, ${f?lit(f)+'::date':'null'}, ${lit(t)}::date)`),
+  bankDetail: (v, d, k) => sqlJson(`bank_detail(${Number(v)}::smallint, ${lit(d)}::date, ${lit(k)})`),
   docs: (f, t, k, v) => sqlJson(`documents_list(${lit(f)}::date, ${lit(t)}::date, ${k?lit(k):'null'}, ${v?Number(v)+'::smallint':'null'})`),
   photos: (kind, ref) => sql(`select id, created_at, coalesce(uploaded_by, case source when 'app' then 'التطبيق' else 'اللوحة' end) as who, check_status, check_note from attachments where kind = ${lit(kind)} and ref_id = ${lit(String(ref))} and deleted_at is null order by created_at`),
   image: id => sqlJson(`attachment_image(${lit(id)}::uuid)`),
@@ -918,38 +919,90 @@ function bankCard(b){
       <span>إيداع شيكات</span><span class="num">− ${jd(b.dep_cheque)}</span>
       ${num(b.bank_in)?`<span class="muted">تحويلات كليك (في البنك مباشرة)</span><span class="num muted">${jd(b.bank_in)}</span>`:''}
     </div>
-    <div class="kpis" style="margin-top:12px"><div class="kpi"><div class="label">غير مودع: نقد</div><div class="value${ncls(b.undeposited_cash)}">${jd(b.undeposited_cash)}</div></div><div class="kpi"><div class="label">غير مودع: شيكات</div><div class="value">${jd(b.undeposited_cheques)}</div></div><div class="kpi"><div class="label">المجموع المدور</div><div class="value">${jd(b.undeposited)}</div></div></div>
+    <div class="kpis" style="margin-top:12px"><div class="kpi click" role="button" tabindex="0" title="اضغط لرؤية التفاصيل" data-act="bankDetail" data-van="${b.van_no}" data-kind="cash" style="cursor:pointer"><div class="label">غير مودع: نقد ▸</div><div class="value${ncls(b.undeposited_cash)}">${jd(b.undeposited_cash)}</div></div><div class="kpi click" role="button" tabindex="0" title="اضغط لرؤية التفاصيل" data-act="bankDetail" data-van="${b.van_no}" data-kind="cheque" style="cursor:pointer"><div class="label">غير مودع: شيكات ▸</div><div class="value">${jd(b.undeposited_cheques)}</div></div><div class="kpi"><div class="label">المجموع المدور</div><div class="value">${jd(b.undeposited)}</div></div></div>
   </div>`;
 }
 function viewBank(){
-  const deps = (D.deposits||[]).filter(d=>state.showDeleted || !d.deleted);
+  const bv = state.bankVan || 'all';                       // 'all' | van number
+  const vanOk = v => bv === 'all' || String(v) === String(bv) || v == null;
+  const deps = (D.deposits||[]).filter(d=>(state.showDeleted || !d.deleted) && vanOk(d.van_no));
   const bk = state.bank || {};
-  const waiting = (D.cheques||[]).filter(c=>!c.deposit_id && c.status!=='مرتجع' && c.received_on >= (D.bank_start||'2000-01-01'));
+  const waiting = (D.cheques||[]).filter(c=>!c.deposit_id && c.status!=='مرتجع' && c.received_on >= (D.bank_start||'2000-01-01') && vanOk(c.van_no));
   const before = state.day < (D.bank_start||'');
+  const cards = (D.bank||[]).filter(b=>vanOk(b.van_no));
+  const seg = `<div class="seg" role="group" aria-label="السيارة"><button type="button" data-bankvan="all" aria-pressed="${bv==='all'}">السيارتان معاً</button>${vanNos().map(x=>`<button type="button" data-bankvan="${x}" aria-pressed="${String(bv)===String(x)}">${esc(vanName(x))}</button>`).join('')}</div>`;
+  const depTable = (id, rows, title) => `<div class="sec-head" style="margin-top:10px"><h3>${title}</h3><span class="controls">${rows.length?copyBtn(id):''}</span></div>
+      ${rows.length?`<div class="tablebox"><table id="${id}"><thead><tr><th>السيارة</th><th>النوع</th><th class="n">المبلغ</th><th>البنك</th><th>رقم الإيصال</th><th>الشيكات</th><th>الصورة</th><th>ملاحظة</th><th class="noexp"></th></tr></thead><tbody>
+      ${rows.map(d=>`<tr class="${d.deleted?'gone':''}"><td class="keep">${d.van_no?vanPill(d.van_no):'المكتب'}</td><td>${DEP_KIND[d.kind]}</td><td class="n">${jd(d.amount)}</td><td>${esc(d.bank||'')}</td><td>${esc(d.reference||'')}</td><td style="white-space:normal;font-size:.78rem">${(d.cheques||[]).map(c=>esc(c.customer_name)+' '+jd(c.amount)).join('، ')}</td><td class="keep">${d.source==='excel_import'?'<span class="muted">من الإكسل</span>':photoCell('deposit', d.id, d.has_photo, DEP_KIND[d.kind]+' '+jd(d.amount), state.day, d.van_no)}</td><td>${esc(d.note||'')}</td><td class="noexp keep">${D.closed?'':d.deleted?resBtn('bank_deposits',d.id):`<span class="actions"><button type="button" class="icon-btn" data-editdep="${d.id}">تعديل</button>${delBtn('bank_deposits',d.id,'حذف '+DEP_KIND[d.kind]+' '+jd(d.amount))}</span>`}</td></tr>`).join('')}
+      ${(()=>{const lv=rows.filter(d=>!d.deleted);return `<tr class="total"><td colspan="2">الاجمالي · ${lv.length} إيداع</td><td class="n">${jd(sum(lv,'amount'))}</td><td colspan="5"></td><td class="noexp"></td></tr>`;})()}
+      </tbody></table></div>`:'<div class="panel empty">لا إيداعات.</div>'}`;
   return `<section class="view">
-    <div class="sec-head"><div><h2>الإيداع والبنك — ${esc(dayName(state.day))}</h2><p>كل ما تحصّله السيارة نقداً أو بشيكات يجب أن يُودع في البنك مع صورة إيصال البنك. ما لم يُودع يُدوَّر يوماً بعد يوم كعجز. التحويلات (كليك) تدخل البنك مباشرة. الحساب يبدأ من ${esc(D.bank_start||'')}.</p></div>
-      <div class="controls"><button class="btn" type="button" data-act="newDeposit">+ إيداع</button></div></div>
-    ${before?`<div class="banner">هذا التاريخ قبل بداية متابعة البنك (${esc(D.bank_start)}). الإيداعات القديمة محفوظة وتظهر في التقارير.</div>`:`<div class="grid2">${(D.bank||[]).map(bankCard).join('')}</div>`}
+    <div class="sec-head"><div><h2>الإيداع والبنك — ${esc(dayName(state.day))}</h2><p>كل ما تحصّله السيارة نقداً أو بشيكات يجب أن يُودع في البنك مع صورة إيصال البنك. ما لم يُودع يُدوَّر يوماً بعد يوم كعجز. التحويلات (كليك) تدخل البنك مباشرة. الحساب يبدأ من ${esc(D.bank_start||'')}. اضغط على رقم «غير مودع» لرؤية ما يتكوّن منه.</p></div>
+      <div class="controls">${seg}<button class="btn" type="button" data-act="newDeposit">+ إيداع</button></div></div>
+    ${before?`<div class="banner">هذا التاريخ قبل بداية متابعة البنك (${esc(D.bank_start)}). الإيداعات القديمة محفوظة وتظهر في التقارير.</div>`:`<div class="grid2">${cards.map(bankCard).join('')}</div>`}
     <div>
       <div class="sec-head"><h3>إيداعات اليوم</h3><span class="controls"><label class="toggle"><input type="checkbox" id="showDel" ${state.showDeleted?'checked':''}> إظهار المحذوف</label></span></div>
-      ${deps.length?`<div class="tablebox"><table id="tDep"><thead><tr><th>السيارة</th><th>النوع</th><th class="n">المبلغ</th><th>البنك</th><th>رقم الإيصال</th><th>الشيكات</th><th>الصورة</th><th>ملاحظة</th><th class="noexp"></th></tr></thead><tbody>
-      ${deps.map(d=>`<tr class="${d.deleted?'gone':''}"><td class="keep">${d.van_no?vanPill(d.van_no):'المكتب'}</td><td>${DEP_KIND[d.kind]}</td><td class="n">${jd(d.amount)}</td><td>${esc(d.bank||'')}</td><td>${esc(d.reference||'')}</td><td style="white-space:normal;font-size:.78rem">${(d.cheques||[]).map(c=>esc(c.customer_name)+' '+jd(c.amount)).join('، ')}</td><td class="keep">${d.source==='excel_import'?'<span class="muted" style="font-size:.78rem">من الإكسل</span>':photoCell('deposit', d.id, d.has_photo, DEP_KIND[d.kind]+' '+jd(d.amount), state.day, d.van_no)}</td><td>${esc(d.note||'')}</td><td class="noexp keep">${D.closed?'':d.deleted?resBtn('bank_deposits',d.id):`<span class="actions"><button type="button" class="icon-btn" data-editdep="${d.id}">تعديل</button>${delBtn('bank_deposits',d.id,'حذف '+DEP_KIND[d.kind]+' '+jd(d.amount))}</span>`}</td></tr>`).join('')}
-      ${(()=>{const lv=deps.filter(d=>!d.deleted);return `<tr class="total"><td colspan="2">الاجمالي · ${lv.length} إيداع</td><td class="n">${jd(sum(lv,'amount'))}</td><td colspan="5"></td><td class="noexp"></td></tr>`;})()}
-      </tbody></table></div>`:'<div class="panel empty">لا إيداعات في هذا اليوم.</div>'}
+      ${depTable('tDepCash', deps.filter(d=>d.kind==='cash'), 'إيداعات نقدية')}
+      ${depTable('tDepChq', deps.filter(d=>d.kind==='cheque'), 'إيداعات شيكات')}
+      ${depTable('tDep', deps, 'كل الإيداعات (نقد وشيكات)')}
     </div>
     <div>
       <div class="sec-head"><div><h3>شيكات بانتظار الإيداع</h3><p>استُلمت ولم تُربط بإيداع بعد.</p></div></div>
-      ${waiting.length?`<div class="tablebox"><table><thead><tr><th>العميل</th><th>السيارة</th><th>رقم الشيك</th><th class="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th><th>الحالة</th></tr></thead><tbody>${waiting.map(c=>`<tr><td>${esc(c.customer_name)}</td><td>${c.van_no?vanPill(c.van_no):''}</td><td>${esc(c.cheque_no)}</td><td class="n">${jd(c.amount)}</td><td>${c.received_on}</td><td>${c.due_on}</td><td>${esc(c.status)}</td></tr>`).join('')}<tr class="total"><td colspan="3">الاجمالي</td><td class="n">${jd(sum(waiting,'amount'))}</td><td colspan="3"></td></tr></tbody></table></div>`:'<div class="panel empty">لا شيكات بانتظار الإيداع.</div>'}
+      ${waiting.length?`<div class="tablebox"><table><thead><tr><th>العميل</th><th>السيارة</th><th>رقم الشيك</th><th class="n">المبلغ</th><th>الاستلام</th><th>الاستحقاق</th><th>الحالة</th></tr></thead><tbody>${waiting.map(c=>`<tr><td>${esc(c.customer_name)}</td><td>${c.van_no?vanPill(c.van_no):''}</td><td>${esc(c.cheque_no)}</td><td class="n">${jd(c.amount)}</td><td>${c.received_on}</td><td>${c.due_on}</td><td>${esc(c.status)}</td></tr>`).join('')}<tr class="total"><td colspan="3">الاجمالي · ${waiting.length} شيك</td><td class="n">${jd(sum(waiting,'amount'))}</td><td colspan="3"></td></tr></tbody></table></div>`:'<div class="panel empty">لا شيكات بانتظار الإيداع.</div>'}
     </div>
     <div>
-      <div class="sec-head"><div><h3>كشف البنك لفترة</h3><p>يوماً بيوم: ما حُصّل وما أودع وما بقي خارج البنك.</p></div>
+      <div class="sec-head"><div><h3>كشف البنك لفترة</h3><p>يوماً بيوم: ما حُصّل وما أودع وما بقي خارج البنك — النقد وحده، الشيكات وحدها، ثم معاً. يتبع اختيار السيارة أعلاه.</p></div>
         <span class="controls"><span class="toggle">من <input type="date" id="bFrom" value="${esc(bk.from||rangeOf('this_month')[0])}"></span><span class="toggle">إلى <input type="date" id="bTo" value="${esc(bk.to||state.day)}"></span><button class="btn sec" type="button" data-act="loadBank">عرض</button></span></div>
       ${bk.data?bankTables(bk.data):'<div class="panel empty">اختر الفترة ثم اضغط «عرض».</div>'}
     </div>
   </section>`;
 }
 function bankTables(X){
-  let i = 900; return tablesFor('cash', X).map(tb=>renderTable(tb, i++, '')).join('');
+  const days = X.bank_days||[], deps = X.deposits||[];
+  const dk = d => ({...d, kind_name:DEP_KIND[d.kind], photo:d.source==='excel_import'?'من الإكسل':d.has_photo?'✔':'بلا صورة'});
+  const depCols = [['day','التاريخ','date'],['van_no','السيارة','van'],['kind_name','النوع','text'],['amount','المبلغ','jd'],['bank','البنك','text'],['reference','رقم الإيصال','text'],['photo','الصورة','text'],['note','ملاحظة','text']];
+  const depAct = d => d.id ? repActs('dep', d.id, d.day, 'bank_deposits', 'حذف '+(DEP_KIND[d.kind]||'إيداع')+' '+jd(d.amount)) : '';
+  const tbs = [
+    T('الإيداع والبنك لكل سيارة', [['name','السيارة','text'],['opening_undeposited','غير مودع أول الفترة','jd'],['cash_in','تسديدات نقدية','jd'],['cheque_in','شيكات','jd'],['cash_expenses','مصاريف نقدية','jd'],['dep_cash','إيداع نقدي','jd'],['dep_cheque','إيداع شيكات','jd'],['closing_cash','غير مودع: نقد','jd'],['closing_cheques','غير مودع: شيكات','jd'],['closing_undeposited','غير مودع آخر الفترة','jd'],['bank_in','كليك (للعلم)','jd']], X.bank, {total:true}),
+    T('النقد يوماً بيوم', [['day','اليوم','date'],['van_no','السيارة','van'],['cash_in','تسديدات نقدية','jd'],['cash_expenses','مصاريف نقدية','jd'],['dep_cash','إيداع نقدي','jd'],['undeposited_cash','غير مودع: نقد','jd']], days.filter(d=>num(d.cash_in)||num(d.cash_expenses)||num(d.dep_cash)), {total:true, totalSkip:['undeposited_cash']}),
+    T('الشيكات يوماً بيوم', [['day','اليوم','date'],['van_no','السيارة','van'],['cheque_in','شيكات مستلمة','jd'],['dep_cheque','إيداع شيكات','jd'],['undeposited_cheques','غير مودع: شيكات','jd']], days.filter(d=>num(d.cheque_in)||num(d.dep_cheque)), {total:true, totalSkip:['undeposited_cheques']}),
+    T('النقد والشيكات معاً يوماً بيوم', [['day','اليوم','date'],['van_no','السيارة','van'],['carried','مدور من الأمس','jd'],['cash_in','تسديدات نقدية','jd'],['cheque_in','شيكات','jd'],['cash_expenses','مصاريف نقدية','jd'],['dep_cash','إيداع نقدي','jd'],['dep_cheque','إيداع شيكات','jd'],['undeposited','غير مودع','jd']], days, {total:true, totalSkip:['carried','undeposited']}),
+    T('سجل الإيداعات النقدية', depCols, deps.filter(d=>d.kind==='cash').map(dk), {total:true, act: depAct}),
+    T('سجل إيداعات الشيكات', depCols, deps.filter(d=>d.kind==='cheque').map(dk), {total:true, act: depAct}),
+    T('سجل كل الإيداعات', depCols, deps.map(dk), {total:true, act: depAct}),
+  ];
+  let i = 900; return tbs.map(tb=>renderTable(tb, i++, '')).join('');
+}
+// what a van's «غير مودع» is made of, on the day shown
+async function bankDetail(van, kind){
+  let j; try { j = await API.bankDetail(van, state.day, kind); } catch(e){ toast(cleanError(e)); return; }
+  j = Array.isArray(j) ? j[0] : j; if (!j) return;
+  const title = `${kind==='cash'?'غير مودع: نقد':'غير مودع: شيكات'} — ${esc(vanName(van))} حتى ${dmy(state.day)}`;
+  let body;
+  if (kind === 'cheque') {
+    const rows = j.rows||[];
+    body = `<p class="muted" style="margin:0 0 8px;font-size:.86rem">الشيكات التي استلمتها السيارة ولم تُودع بعد حتى هذا اليوم${num(j.ledger_total)!==num(j.total)?` <span style="color:var(--bad)">(سندات الشيكات في الدفتر ${jd(j.ledger_total)} — يوجد سند شيك بلا شيك مسجّل)</span>`:''}.</p>
+      <div class="tablebox" style="max-height:55vh;overflow:auto"><table style="font-size:.86rem"><thead><tr><th>الاستلام</th><th>السند</th><th>العميل</th><th>رقم الشيك</th><th>الاستحقاق</th><th>الحالة</th><th class="n">المبلغ</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td>${dmy(r.received_on)}</td><td>${esc(r.voucher||'—')}</td><td>${esc(r.customer_name)}</td><td>${esc(r.cheque_no)}</td><td>${dmy(r.due_on)}</td><td>${esc(r.status)}${r.deposited_on?` <span class="muted">(أُودع ${dmy(r.deposited_on)})</span>`:''}</td><td class="n">${jd(r.amount)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">لا شيكات</td></tr>'}
+      <tr class="total"><td colspan="6">الاجمالي · ${rows.length} شيك</td><td class="n">${jd(j.total)}</td></tr></tbody></table></div>`;
+  } else {
+    const col = j.collections||[], dep = j.deposits||[], ex = j.expenses||[];
+    body = `<p class="muted" style="margin:0 0 8px;font-size:.86rem">منذ آخر يوم كان النقد فيه مودعاً بالكامل (${dmy(j.since)}): كل ما قُبض نقداً، ناقص ما أُودع${ex.length?' وما دُفع من مصاريف':''}.</p>
+      <div class="tablebox" style="max-height:55vh;overflow:auto"><table style="font-size:.86rem"><thead><tr><th>التاريخ</th><th>البيان</th><th>العميل / البنك</th><th class="n">قبض نقدي</th><th class="n">إيداع / مصروف</th></tr></thead><tbody>
+      ${num(j.carried)?`<tr><td>${dmy(j.since)}</td><td colspan="2">مدور من قبل${num(j.carried)<0?' (مودع أكثر)':''}</td><td class="n">${jd(j.carried)}</td><td></td></tr>`:''}
+      ${[...col.map(c=>({day:c.day, t:'col', c})), ...dep.map(d=>({day:d.day, t:'dep', d})), ...ex.map(e=>({day:e.day, t:'ex', e}))].sort((a,b)=>String(a.day).localeCompare(String(b.day))).map(x=>
+        x.t==='col' ? `<tr><td>${dmy(x.day)}</td><td>${esc(x.c.number?'سند '+x.c.number:x.c.invoice_number?'تسديد فاتورة '+x.c.invoice_number:x.c.method)}</td><td>${esc(x.c.customer_name)}</td><td class="n">${jd(x.c.amount)}</td><td></td></tr>`
+        : x.t==='dep' ? `<tr style="color:var(--good)"><td>${dmy(x.day)}</td><td>إيداع نقدي${x.d.reference?' · '+esc(x.d.reference):''}</td><td>${esc(x.d.bank||'')}</td><td></td><td class="n">− ${jd(x.d.amount)}</td></tr>`
+        : `<tr><td>${dmy(x.day)}</td><td>مصروف نقدي</td><td>${esc(x.e.category||'')}</td><td></td><td class="n">− ${jd(x.e.amount)}</td></tr>`).join('')}
+      <tr class="total"><td colspan="3">${col.length} سند قبض · ${dep.length} إيداع</td><td class="n">${jd(sum(col,'amount'))}</td><td class="n">− ${jd(sum(dep,'amount')+sum(ex,'amount'))}</td></tr>
+      <tr class="total"><td colspan="4">غير مودع: نقد</td><td class="n"><b>${jd(j.total)}</b></td></tr></tbody></table></div>`;
+  }
+  const m = $('#modal');
+  m.innerHTML = `<div class="overlay" role="dialog" aria-modal="true"><div class="sheet" style="max-width:860px"><h2>${title}</h2>${body}
+    <div class="sheet-foot"><span class="grow"></span><button type="button" class="btn sec" id="mcancel">إغلاق</button></div></div></div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('#mcancel').onclick = close;
+  m.querySelector('.overlay').addEventListener('click', e => { if (e.target.classList.contains('overlay')) close(); });
 }
 
 // ================================================================ expenses
@@ -1775,7 +1828,7 @@ function usagePanel(u){
 function viewControl(){
   if (!state.viewers && !state.vwLoading) { state.vwLoading = true; sqlJson('viewers_list()').then(x=>{ state.viewers = x||[]; if (current()==='control') render(); }).catch(()=>{ state.viewers = []; }); }
   if (!state.usage && !state.usLoading) { state.usLoading = true; sqlJson('db_usage()').then(x=>{ state.usage = (Array.isArray(x)?x[0]:x)||{}; if (current()==='control') render(); }).catch(()=>{ state.usage = {}; }); }
-  const s=D.settings||[], keys=[...new Set([...s.map(x=>x.key), 'خصم المصاريف النقدية من النقد قبل الإيداع', 'أحدث إصدار', 'رابط التحديث'])].filter(k=>k!=='وضع الصيانة' && k!=='رسالة الصيانة' && k!=='عدد الأيام المسموح الرجوع لها للمدراء');
+  const s=D.settings||[], keys=[...new Set([...s.map(x=>x.key), 'خصم المصاريف النقدية من النقد قبل الإيداع', 'اختيار التاريخ للإيداعات', 'أحدث إصدار', 'رابط التحديث'])].filter(k=>k!=='وضع الصيانة' && k!=='رسالة الصيانة' && k!=='عدد الأيام المسموح الرجوع لها للمدراء');
   const val=(van,k)=>{const r=s.find(x=>(x.van_no??null)===van && x.key===k);return r?r.value:'';};
   const NUM_SET={'عدد الأيام المسموح الرجوع لها':{type:'number',min:0,max:60,hint:'أيام'},'وزن السلة':{type:'number',min:0,step:'0.01',hint:'كغم'},'رقم بداية الفاتورة':{type:'number',min:1,hint:''},'رقم واتساب الإدارة':{type:'text',hint:'9627…'},'أحدث إصدار':{type:'text',hint:'مثل 2.4',w:90},'رابط التحديث':{type:'text',hint:'https://…/cashvan-2.4.apk',w:260}};
   const choice=(van,k)=>{const v=val(van,k);
@@ -1790,6 +1843,7 @@ function viewControl(){
       ${maintOn()?'<button class="btn" type="button" data-act="maintOff">▶ استئناف الإرسال</button>':'<button class="btn sec" type="button" data-act="maintOn" style="border-color:var(--bad);color:var(--bad)">⏸ إيقاف الإرسال من التطبيقات</button>'}</div>
     <div class="sec-head"><div><h2>التحكم بالتطبيقات</h2><p>«العام» يطبَّق على كل السيارات، وعمود السيارة يغلبه لتلك السيارة فقط. تصل للتطبيقات عند مزامنتها. يمكن تعديل كل سيارة وحدها من تبويب «السيارات» أيضاً.</p>
     <p><b>أحدث إصدار</b> و<b>رابط التحديث</b>: اكتب رقم الإصدار الجديد ورابط ملف APK على GitHub. كل هاتف يرى «تحديث جديد» عند مزامنته ويثبّته بضغطة. اتركهما فارغين إذا لا يوجد تحديث.</p>
+    <p><b>اختيار التاريخ للإيداعات</b>: يسمح للسائق باختيار تاريخ الإيداع في التطبيق (إيداع أمس مثلاً) ضمن أيام الرجوع المسموحة. الأصل «نعم».</p>
     <p><b>خصم المصاريف النقدية من النقد قبل الإيداع</b>: الأصل «لا» — المصاريف تدخل الأرباح والخسائر فقط ولا تُنقص ما يجب أن تودعه السيارة. اختر «نعم» إذا كان السائق يدفع المصاريف من نقد التسديدات.</p>
     <p><b>عدد الأيام المسموح الرجوع لها</b>: رقم واحد يحكم كل ما يدخله السائق بتاريخ سابق — فواتير ومشتريات وتحويلات ومصاريف وإيداعات. قاعدة البيانات ترفض أي إدخال من التطبيق أقدم من هذا العدد. اللوحة (أنت) غير مقيّدة به.</p></div></div>
     ${keys.length?`<div class="tablebox"><div class="set-grid" style="grid-template-columns:minmax(0,2fr) repeat(${vs.length+1},minmax(90px,1fr))"><div class="hd">الإعداد</div><div class="hd">العام</div>${vs.map(v=>`<div class="hd">${esc(vanName(v))}</div>`).join('')}
@@ -2428,7 +2482,7 @@ async function loadStatement(id, from, to){
   try { state.stmt = await API.statement(id, from, to||state.day); render(); } catch(ex){ toast(cleanError(ex)); }
 }
 main.addEventListener('click', async e=>{
-  const t = e.target.closest('button,tr[data-cust],tr[data-day]'); if(!t) return;
+  const t = e.target.closest('button,tr[data-cust],tr[data-day],[data-act=bankDetail]'); if(!t) return;
   const ds = t.dataset;
   if (ds.addact) {
     const d = $('#addDay') && $('#addDay').value; if (!d) { toast('اختر التاريخ'); return; }
@@ -2499,9 +2553,12 @@ main.addEventListener('click', async e=>{
   if (ds.act==='stPrint') return exportStatement();
   if (ds.act==='loadBank') {
     const f=$('#bFrom').value, to=$('#bTo').value; state.bank={from:f,to:to};
-    try { state.bank.data = await API.report(f, to, [], ['cash'], {}); render(); } catch(ex){ toast(cleanError(ex)); }
+    const vs = state.bankVan && state.bankVan!=='all' ? [Number(state.bankVan)] : [];
+    try { state.bank.data = await API.report(f, to, vs, ['cash'], {}); render(); } catch(ex){ toast(cleanError(ex)); }
     return;
   }
+  if (ds.bankvan) { state.bankVan = ds.bankvan; if (state.bank && state.bank.data) { state.bank.data = null; } render(); return; }
+  if (ds.act==='bankDetail') return bankDetail(Number(ds.van), ds.kind);
   if (ds.act==='loadExp') {
     const f=$('#eFrom').value, to=$('#eTo').value; state.exp={from:f,to:to};
     try { state.exp.data = await API.report(f, to, [], ['expenses'], {}); render(); } catch(ex){ toast(cleanError(ex)); }
@@ -2670,6 +2727,7 @@ API = {
   trading: (f, t, vs) => rpc('viewer_trading', {...tk(), p_from:f, p_to:t, p_vans:vs&&vs.length?vs.map(Number):null}),
   cashflow: (f, t, vs) => rpc('viewer_cashflow', {...tk(), p_from:f, p_to:t, p_vans:vs&&vs.length?vs.map(Number):null}),
   valuations: () => Promise.resolve([]),
+  bankDetail: (v, d, k) => rpc('viewer_bank_detail', {...tk(), p_van:Number(v), p_day:d, p_kind:k}),
   search: (q, f, t, ks, vs) => rpc('viewer_search', {...tk(), p_q:q, p_from:f, p_to:t, p_kinds:ks, p_vans:vs&&vs.length?vs.map(Number):null}),
 };
 // saves: the dashboard writes "select office_xxx(<literals>) [->>'k'] [as a]"; read the literals back and
