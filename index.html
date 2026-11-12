@@ -1706,12 +1706,39 @@ function transferGroups(list){
         ${items.map(x=>`<tr><td>${esc(x.item)}</td><td class="n">${x.n}</td><td class="n">${kg(x.qty)}</td><td class="n">${fmt(x.qty?x.total_cost/x.qty:null,4)}</td><td class="n">${jd(x.total_cost)}</td></tr>`).join('')}
         <tr class="total"><td>الاجمالي / المتوسط</td><td class="n">${g.rows.length}</td><td class="n">${kg(sum(items,'qty'))}</td><td class="n">${fmt(ratio(items,'total_cost','qty'),4)}</td><td class="n">${jd(sum(items,'total_cost'))}</td></tr></tbody></table></div></div>`:''}</div>`; }).join('');
 }
+// the routes present in the loaded period: «from ← to», with how many lines and kilos each
+function transferRoutes(list){
+  const m = {};
+  (list||[]).forEach(t => { const k = (t.from_name||'—')+'|'+(t.to_name||'—'); const r = m[k] || (m[k] = {key:k, from:t.from_name||'—', to:t.to_name||'—', n:0, qty:0, cost:0}); r.n++; r.qty += num(t.qty)||0; r.cost += num(t.total_cost)||0; });
+  return Object.values(m).sort((x,y) => x.from.localeCompare(y.from,'ar') || x.to.localeCompare(y.to,'ar'));
+}
 function viewTransfers(){
   const tr = state.trf || {};
+  let body;
+  if (!tr.data) body = '<div class="panel empty">اختر الفترة ثم اضغط «عرض».</div>';
+  else if (!tr.data.transfers.length) body = '<div class="panel empty">لا تحويلات في هذه الفترة.</div>';
+  else {
+    const all = tr.data.transfers, routes = transferRoutes(all);
+    const sel = (state.trfRoutes||[]).filter(k => routes.some(r => r.key === k));
+    const list = sel.length ? all.filter(t => sel.includes((t.from_name||'—')+'|'+(t.to_name||'—'))) : all;
+    const items = Object.entries(by(list, r=>r.item)).map(([item, rs]) => ({item, qty:sum(rs,'qty'), total_cost:sum(rs,'total_cost'), n:rs.length}));
+    const picked = routes.filter(r => sel.includes(r.key));
+    body = `<div class="kpis four panel">${(tr.data.transfers_by_place||[]).map(b=>`<div class="kpi"><div class="label">${esc(b.name)}</div><div class="value">${jd((num(b.cost_in)||0)-(num(b.cost_out)||0))}</div><div class="sub">وارد ${kg(b.qty_in)} · صادر ${kg(b.qty_out)} كغم</div></div>`).join('')}</div>
+      <div class="panel" style="padding:10px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b>اعرض مسارات محددة</b><span class="controls"><span class="muted" style="font-size:.82rem">${sel.length?`${sel.length} مسار مختار`:'لا اختيار = كل التحويلات'}</span>${sel.length?'<button class="btn sec" type="button" data-act="trfRoutesClear" style="padding:3px 10px;font-size:.82rem">إظهار الكل</button>':''}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 14px">${routes.map(r=>`<label class="toggle" style="font-size:.88rem"><input type="checkbox" data-trfroute="${esc(r.key)}" ${sel.includes(r.key)?'checked':''}> ${esc(r.from)} ← ${esc(r.to)} <span class="muted" style="font-size:.78rem">(${r.n} · ${kg(r.qty)} كغم)</span></label>`).join('')}</div>
+      </div>
+      <div><div class="sec-head"><div><h3>${sel.length?'التحويلات المختارة: '+picked.map(r=>esc(r.from)+' ← '+esc(r.to)).join('، '):'كل التحويلات في الفترة'}</h3><p>${list.length} سطر · ${kg(sum(list,'qty'))} كغم · ${jd(sum(list,'total_cost'))} د.ا · متوسط الكيلو ${fmt(ratio(list,'total_cost','qty'),4)}${sel.length?'':' — بكل الاتجاهات، بالترتيب الزمني.'}</p></div>${copyBtn('tTrfAll')}</div>${transferTable(list, 'tTrfAll')}
+        ${sel.length && items.length>1?`<div style="margin-top:8px"><div class="muted" style="font-size:.85rem;margin-bottom:4px">المختار — حسب الصنف</div><div class="tablebox"><table id="tTrfSelItems"><thead><tr><th>الصنف</th><th class="n">أسطر</th><th class="n">الكمية</th><th class="n">متوسط الكيلو</th><th class="n">القيمة</th></tr></thead><tbody>
+          ${items.map(x=>`<tr><td>${esc(x.item)}</td><td class="n">${x.n}</td><td class="n">${kg(x.qty)}</td><td class="n">${fmt(x.qty?x.total_cost/x.qty:null,4)}</td><td class="n">${jd(x.total_cost)}</td></tr>`).join('')}
+          <tr class="total"><td>الاجمالي / المتوسط</td><td class="n">${list.length}</td><td class="n">${kg(sum(items,'qty'))}</td><td class="n">${fmt(ratio(items,'total_cost','qty'),4)}</td><td class="n">${jd(sum(items,'total_cost'))}</td></tr></tbody></table></div></div>`:''}
+      </div>
+      ${sel.length?'':transferGroups(all)}`;
+  }
   return `<section class="view">
     <div class="sec-head"><div><h2>التحويلات والكلفة</h2><p>كل تحويل محفوظ في مكان واحد بكميته وكلفة الكيلو وقيمته. تطبيق الفروع لاحقاً يقرأ من هنا ما وصل لكل فرع وبأي كلفة.</p></div>
       <span class="controls"><span class="toggle">من <input type="date" id="tFrom" value="${esc(tr.from||rangeOf('this_month')[0])}"></span><span class="toggle">إلى <input type="date" id="tTo" value="${esc(tr.to||state.day)}"></span><button class="btn sec" type="button" data-act="loadTrf">عرض</button><button class="btn" type="button" data-act="newTransfer">+ تحويل</button></span></div>
-    ${tr.data?(tr.data.transfers.length?`<div class="kpis four panel">${(tr.data.transfers_by_place||[]).map(b=>`<div class="kpi"><div class="label">${esc(b.name)}</div><div class="value">${jd((num(b.cost_in)||0)-(num(b.cost_out)||0))}</div><div class="sub">وارد ${kg(b.qty_in)} · صادر ${kg(b.qty_out)} كغم</div></div>`).join('')}</div>${transferGroups(tr.data.transfers)}`:'<div class="panel empty">لا تحويلات في هذه الفترة.</div>'):'<div class="panel empty">اختر الفترة ثم اضغط «عرض».</div>'}
+    ${body}
   </section>`;
 }
 
@@ -2586,6 +2613,7 @@ main.addEventListener('click', async e=>{
     return;
   }
   if (ds.range) { rep.range = ds.range; const [f,to]=rangeOf(ds.range); rep.from=f; rep.to=to; return render(); }
+  if (ds.act==='trfRoutesClear') { state.trfRoutes = []; return render(); }
   if (ds.act==='loadTrf') {
     const f=$('#tFrom').value, to=$('#tTo').value; state.trf={from:f,to:to};
     try { state.trf.data = await API.report(f, to, [], ['transfers'], {}); render(); } catch(ex){ toast(cleanError(ex)); }
@@ -2637,6 +2665,7 @@ main.addEventListener('click', async e=>{
 main.addEventListener('change', async e=>{
   const el=e.target;
   if (el.id==='showDel') { state.showDeleted=el.checked; return render(); }
+  if (el.dataset.trfroute !== undefined) { const k = el.dataset.trfroute, cur = new Set(state.trfRoutes||[]); el.checked ? cur.add(k) : cur.delete(k); state.trfRoutes = [...cur]; return render(); }
   if (el.id==='plMonth' && el.value) {
     const [y,m] = el.value.split('-').map(Number); const last = new Date(y, m, 0).getDate();
     const Q = state.pnl; Q.month = el.value; Q.from = el.value+'-01'; Q.to = el.value+'-'+String(last).padStart(2,'0');
