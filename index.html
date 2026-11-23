@@ -1697,10 +1697,11 @@ async function exportSmallDebtsXlsx(){
 // doc = {title, info:[[label,value]…], cols:[[key,label,type]…], rows, total:{key:value}|null, note}
 const DOC_CO = {name:'شركة خيرات العز للدواجن والمجمدات', line:'لتجارة وتوزيع الدجاج الطازج والمجمد', contact:'هاتف الادارة: 0793056660 | العنوان: تلاع العلي، سوق السلطان'};
 function docHtml(doc){
-  const td = (v, c, st) => `<td class="${isNumT(c[2])?'n':''}" style="color:${isNumT(c[2]) && num(v) < 0 ? '#b4372f' : '#111'};${st||''}">${esc(cellText(v, c[2], {}))}</td>`;
+  const cls = c => isNumT(c[2]) || c[2] === 'date' ? 'n' : c[0] === 'name' ? 'nm' : '';
+  const td = (v, c, st) => `<td class="${cls(c)}" style="color:${isNumT(c[2]) && num(v) < 0 ? '#b4372f' : '#111'};${st||''}">${esc(cellText(v, c[2], {}))}</td>`;
   return `<div class="stmt-doc" style="background:#fff;color:#111;padding:22px;border-radius:8px;border:1px solid #ccc;font-family:Tahoma,Arial,sans-serif">
     ${docHead(esc(doc.title), doc.info.map(([l,v])=>[esc(l), esc(v)]))}
-    <table style="font-size:12px"><thead><tr>${doc.cols.map(c=>`<th class="${isNumT(c[2])?'n':''}" style="background:#1d6b58;color:#fff;position:static">${esc(c[1])}</th>`).join('')}</tr></thead><tbody>
+    <table style="font-size:12px"><thead><tr>${doc.cols.map(c=>`<th class="${cls(c)}" style="background:#1d6b58;color:#fff;position:static">${esc(c[1])}</th>`).join('')}</tr></thead><tbody>
       ${doc.rows.map(r=>`<tr>${doc.cols.map(c=>td(r[c[0]], c)).join('')}</tr>`).join('')}
       ${doc.total?`<tr>${doc.cols.map(c=>td(doc.total[c[0]], c, 'background:#eef2f0;font-weight:700')).join('')}</tr>`:''}
     </tbody></table>
@@ -1709,7 +1710,7 @@ function docHtml(doc){
 }
 async function docSaveHtml(doc, filename){
   const dl = await window.claude?.use?.('downloads'); if (!dl) { toast('التنزيل غير متاح في هذه الشاشة'); return; }
-  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>body{margin:18px;font-family:Tahoma,Arial,sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:right}td.n{text-align:left;direction:ltr}th.n{text-align:left}thead{display:table-header-group}tr{break-inside:avoid}.stmt-doc{border:none!important}@media print{body{margin:8mm}.hint{display:none}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}td{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>${docHtml(doc)}<p class="hint" style="font-size:11px;color:#777">اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p></body></html>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=780"><title>${esc(doc.title)}</title><style>@page{size:A4 portrait;margin:10mm}body{margin:14px;font-family:Tahoma,Arial,sans-serif}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:5px 6px;text-align:right;vertical-align:middle}td.n,th.n{text-align:center}td.n{direction:ltr;white-space:nowrap}td.nm{white-space:nowrap}thead{display:table-header-group}tr{break-inside:avoid}.stmt-doc{border:none!important;padding:0!important;max-width:190mm;margin:0 auto}.hint{max-width:190mm;margin:10px auto 0}@media print{body{margin:0}.hint{display:none}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}td{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>${docHtml(doc)}<p class="hint" style="font-size:11px;color:#777">اختر طباعة (Ctrl+P) للطباعة أو الحفظ PDF.</p></body></html>`;
   try { await dl.save({filename: filename+'.html', data: html}); } catch(e){ if (e && e.code!=='declined') toast('تعذّر التنزيل: '+(e.message||e.code)); }
 }
 async function docSaveXlsx(doc, filename){
@@ -1732,13 +1733,21 @@ async function docCanvas(doc){
   const F = (px, w) => `${w||400} ${px}px ${FF}`;
   const tw = (s, f) => { mc.font = f; return mc.measureText(String(s)).width; };
   const cell = (v, c) => cellText(v, c[2], {});
-  const pad = 30, rowH = 32, headH = 38, FS = 14;
+  const pad = 30, rowH = 32, FS = 14;
   // column widths from the content; the page widens when the columns need it
-  let ws = doc.cols.map(c => Math.ceil(Math.max(tw(c[1], F(FS,600)), ...doc.rows.map(r => tw(cell(r[c[0]], c), F(FS))), doc.total ? tw(cell(doc.total[c[0]], c), F(FS,600)) : 0)) + 22);
+  const mid = c => isNumT(c[2]) || c[2] === 'date';
+  const bodyW = doc.cols.map(c => Math.ceil(Math.max(0, ...doc.rows.map(r => tw(cell(r[c[0]], c), F(FS))), doc.total ? tw(cell(doc.total[c[0]], c), F(FS,600)) : 0)));
+  // a long column name goes on two lines so the column stays as narrow as its numbers
+  const heads = doc.cols.map((c, i) => { const l = String(c[1]), sp = [...l].map((ch, k) => ch === ' ' ? k : -1).filter(k => k > 0);
+    if (!sp.length || tw(l, F(FS,600)) <= bodyW[i] + 8) return [l];
+    const best = sp.map(k => [l.slice(0, k), l.slice(k + 1)]).sort((a, b) => Math.max(tw(a[0], F(FS,600)), tw(a[1], F(FS,600))) - Math.max(tw(b[0], F(FS,600)), tw(b[1], F(FS,600))))[0];
+    return best; });
+  let ws = doc.cols.map((c, i) => Math.max(bodyW[i], ...heads[i].map(h => Math.ceil(tw(h, F(FS,600))))) + 22);
   const infoW = doc.info.reduce((a,[l,v]) => a + tw(l, F(13,600)) + tw(v, F(13)) + 44, 0);
-  const W = Math.max(900, ws.reduce((a,b)=>a+b,0) + pad*2, infoW + pad*2);
+  const headH = heads.some(h => h.length > 1) ? 54 : 38;
+  const W = Math.max(660, ws.reduce((a,b)=>a+b,0) + pad*2, infoW + pad*2);
   const extra = W - pad*2 - ws.reduce((a,b)=>a+b,0);
-  if (extra > 0) { const ti = doc.cols.map((c,i)=>c[2]==='text'?i:-1).filter(i=>i>=0); const idx = ti.length ? ti : doc.cols.map((c,i)=>i); const tot = idx.reduce((a,i)=>a+ws[i],0); idx.forEach(i => { ws[i] += extra*ws[i]/tot; }); }
+  if (extra > 0) ws = ws.map(w => w + extra/ws.length);     // any spare width is shared evenly
   const noteLines = doc.note ? [String(doc.note).replace(/<[^>]+>/g,'')] : [];
   const yTable = pad + 84 + 52 + 34 + 16;
   const H = yTable + headH + doc.rows.length*rowH + (doc.total?rowH:0) + (noteLines.length?40:0) + pad;
@@ -1771,15 +1780,15 @@ async function docCanvas(doc){
       g.strokeStyle = '#bbb'; g.lineWidth = 1; g.strokeRect(cx - w + .5, y + .5, w, h);
       const sv = vals[i]; if (sv !== '' && sv !== null && sv !== undefined) {
         const color = opt.color || (numeric && opt.raw && num(opt.raw[c[0]]) < 0 ? '#b4372f' : '#111');
-        if (numeric && !opt.head) text(sv, cx - w + 10, y + h/2, F(FS, opt.bold?600:400), color, 'left', 'ltr');
-        else if (numeric) text(sv, cx - w + 10, y + h/2, F(FS,600), color, 'left', 'rtl');
+        if (opt.head) { const ls = sv; ls.forEach((l, k) => mid(c) ? text(l, cx - w/2, y + h/2 + (k - (ls.length-1)/2)*18, F(FS,600), color, 'center', 'rtl') : text(l, cx - 10, y + h/2 + (k - (ls.length-1)/2)*18, F(FS,600), color, 'right', 'rtl')); }
+        else if (mid(c)) text(sv, cx - w/2, y + h/2, F(FS, opt.bold?600:400), color, 'center', 'ltr');
         else text(sv, cx - 10, y + h/2, F(FS, opt.bold?600:400), color, 'right', 'rtl');
       }
       cx -= w;
     });
     y += h;
   };
-  drawRow(doc.cols.map(c=>c[1]), headH, {bg:'#1d6b58', color:'#fff', bold:true, head:true});
+  drawRow(heads, headH, {bg:'#1d6b58', color:'#fff', bold:true, head:true});
   doc.rows.forEach((r, i) => drawRow(doc.cols.map(c=>cell(r[c[0]], c)), rowH, {raw:r, bg: i%2 ? '#f7f9f8' : null}));
   if (doc.total) drawRow(doc.cols.map(c=>cell(doc.total[c[0]], c)), rowH, {raw:doc.total, bg:'#eef2f0', bold:true});
   if (noteLines.length) text(noteLines[0], W - pad, y + 24, F(15,600), '#111');
@@ -1805,20 +1814,20 @@ function debtDoc(which){
     const rows = main.map(r=>({...r, over30:(num(r.age_31_60)||0)+(num(r.age_60p)||0)})).filter(r=>r.over30>0.005).sort((a,b)=>b.over30-a.over30)
       .map(r=>({number:r.number, name:r.name, age_31_60:num(r.age_31_60)||null, age_60p:num(r.age_60p)||null, over30:r.over30, total_due:r.total_due, lp:d(r.last_payment), ls:d(r.last_sale)}));
     return {file:'ذمم أقدم من 30 يوماً', title:'كـشـف الـذمـم الأقـدم مـن 30 يـومـاً', info:info(rows.length), rows,
-      cols:[['number','#','int'],['name','العميل','text'],['age_31_60','31–60 يوماً','jd'],['age_60p','أكثر من 60','jd'],['over30','أقدم من 30 يوماً','jd'],['total_due','كل ذمته','jd'],['lp','آخر دفعة','text'],['ls','آخر فاتورة','text']],
+      cols:[['number','#','int'],['name','العميل','text'],['age_31_60','31–60 يوماً','jd'],['age_60p','أكثر من 60','jd'],['over30','أقدم من 30 يوماً','jd'],['total_due','كل ذمته','jd'],['lp','آخر دفعة','date'],['ls','آخر فاتورة','date']],
       total:{...tot(rows, ['age_31_60','age_60p','over30','total_due']), number:null}, note:`مجموع الذمم الأقدم من 30 يوماً حتى ${d(state.day)} هو ${jd(sum(rows,'over30'))} د.ا`};
   }
   if (which === 'small') {
     const rows = small.map(r=>({number:r.number, name:r.name, total_due:r.total_due, ls:d(r.last_sale), lp:d(r.last_payment), idle:r.idle===9999?null:r.idle}));
     return {file:'ذمم صغيرة راكدة', title:'كـشـف الـذمـم الـصـغـيـرة الـراكـدة', info:info(rows.length), rows,
-      cols:[['number','#','int'],['name','العميل','text'],['total_due','الذمة','jd'],['ls','آخر فاتورة','text'],['lp','آخر دفعة','text'],['idle','أيام بلا حركة','int']],
+      cols:[['number','#','int'],['name','العميل','text'],['total_due','الذمة','jd'],['ls','آخر فاتورة','date'],['lp','آخر دفعة','date'],['idle','أيام بلا حركة','int']],
       total:{...tot(rows, ['total_due']), number:null, idle:null}, note:`مجموع الذمم الصغيرة الراكدة حتى ${d(state.day)} هو ${jd(sum(rows,'total_due'))} د.ا`};
   }
   const rows = main.filter(r=>Math.abs(num(r.total_due)||0) > 0.005 || Math.abs(num(r.closing)||0) > 0.005)
     .map(r=>({number:r.number, name:r.name, total_due:r.total_due, cheques_pending:num(r.cheques_pending)||null, closing:r.closing,
       a30:((num(r.age_0_7)||0)+(num(r.age_8_15)||0)+(num(r.age_16_30)||0))||null, age_31_60:num(r.age_31_60)||null, age_60p:num(r.age_60p)||null, lp:d(r.last_payment)}));
   return {file:'كشف الذمم', title:'كـشـف الـذمـم', info:info(rows.length), rows,
-    cols:[['number','#','int'],['name','العميل','text'],['total_due','الذمة قبل تحصيل الشيكات','jd'],['cheques_pending','شيكات لم تُحصّل','jd'],['closing','بعد تحصيل الشيكات','jd'],['a30','0–30 يوماً','jd'],['age_31_60','31–60','jd'],['age_60p','أكثر من 60','jd'],['lp','آخر دفعة','text']],
+    cols:[['number','#','int'],['name','العميل','text'],['total_due','الذمة قبل تحصيل الشيكات','jd'],['cheques_pending','شيكات لم تُحصّل','jd'],['closing','بعد تحصيل الشيكات','jd'],['a30','0–30 يوماً','jd'],['age_31_60','31–60','jd'],['age_60p','أكثر من 60','jd'],['lp','آخر دفعة','date']],
     total:{...tot(rows, ['total_due','cheques_pending','closing','a30','age_31_60','age_60p']), number:null}, note:`مجموع الذمم حتى ${d(state.day)} هو ${jd(sum(rows,'total_due'))} د.ا`};
 }
 async function debtDocExport(which, fmtKind){
