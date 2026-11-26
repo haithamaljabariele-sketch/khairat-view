@@ -2035,8 +2035,8 @@ function viewerForm(v){
   openModal(`<h2>${v?'تعديل مدير':'مدير جديد — لوحة عرض فقط'}</h2>
     <div class="form-grid">
       <div class="field"><label for="f_vn">الاسم</label><input id="f_vn" name="name" value="${esc(v?v.name:'')}"></div>
-      <div class="field"><label for="f_vu">اسم الدخول (إنجليزي)</label><input id="f_vu" name="username" dir="ltr" autocomplete="off" value="${esc(v?v.username:'')}"></div>
-      <div class="field"><label for="f_vp">${v?'كلمة مرور جديدة (اتركها فارغة لعدم التغيير)':'كلمة المرور (6 أحرف على الأقل)'}</label><input id="f_vp" name="password" dir="ltr" autocomplete="new-password"></div>
+      <div class="field"><label for="f_vu">اسم الدخول (إنجليزي)</label><input id="f_vu" name="username" dir="ltr" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(v?v.username:'')}"></div>
+      <div class="field"><label for="f_vp">${v?'كلمة مرور جديدة (اتركها فارغة لعدم التغيير)':'كلمة المرور (6 أحرف على الأقل)'}</label><input id="f_vp" name="password" dir="ltr" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false"><span class="muted" style="font-size:.76rem">تُحفظ كما تكتبها تماماً: الحرف الكبير غير الصغير. أعطها للمدير كما هي.</span></div>
       ${v?`<div class="field"><label for="f_va">الحالة</label><select id="f_va" name="active"><option value="true" ${v.active?'selected':''}>فعّال</option><option value="false" ${!v.active?'selected':''}>موقوف</option></select></div>`:''}
     </div>
     <div class="controls"><span class="muted" style="font-size:.85rem">يرى:</span>${vanNos().map(n=>`<label class="toggle"><input type="checkbox" class="vv" value="${n}" ${v&&v.vans&&v.vans.includes(n)?'checked':''}> ${esc(vanName(n))}</label>`).join('')}<span class="muted" style="font-size:.78rem">بدون اختيار = كل السيارات</span></div>
@@ -2044,7 +2044,7 @@ function viewerForm(v){
       <div class="vt-grid">${VIEWER_TABS.map(([k,t])=>{const lv=tabLevel(v,k);return `<label class="vt-row"><span>${t}</span><select class="vt" data-tab="${k}" aria-label="${t}">${[['none','لا يرى'],['view','يرى فقط'],['edit','يرى ويعدّل']].map(([o,l])=>`<option value="${o}" ${o===lv?'selected':''}>${l}</option>`).join('')}</select></label>`;}).join('')}</div>
       <div class="controls" style="margin-top:6px"><button type="button" class="btn sec" data-vtall="view">الكل: يرى فقط</button><button type="button" class="btn sec" data-vtall="edit">الكل: يرى ويعدّل</button></div></div>`,
     async (fd, form) => {
-      const p = {id:v?v.id:undefined, name:fd.get('name'), username:fd.get('username'), password:fd.get('password')||'', vans:[...form.querySelectorAll('.vv:checked')].map(i=>Number(i.value)), ...(()=>{const sel=[...form.querySelectorAll('select.vt')];const see=sel.filter(x=>x.value!=='none').map(x=>x.dataset.tab);if(!see.length) throw {message:'ERROR: اختر صفحة واحدة على الأقل'};return {tabs: see.length===sel.length?[]:see, edit_tabs: sel.filter(x=>x.value==='edit').map(x=>x.dataset.tab)};})(), active:fd.get('active')?fd.get('active')==='true':undefined};
+      const p = {id:v?v.id:undefined, name:fd.get('name'), username:(fd.get('username')||'').trim(), password:(fd.get('password')||'').trim(), vans:[...form.querySelectorAll('.vv:checked')].map(i=>Number(i.value)), ...(()=>{const sel=[...form.querySelectorAll('select.vt')];const see=sel.filter(x=>x.value!=='none').map(x=>x.dataset.tab);if(!see.length) throw {message:'ERROR: اختر صفحة واحدة على الأقل'};return {tabs: see.length===sel.length?[]:see, edit_tabs: sel.filter(x=>x.value==='edit').map(x=>x.dataset.tab)};})(), active:fd.get('active')?fd.get('active')==='true':undefined};
       await sql(`select office_save_viewer(${lit(JSON.stringify(p))}::jsonb, ${lit(ACTOR)})`);
       state.viewers = await sqlJson('viewers_list()');
       return v ? 'عُدّل المدير' : 'أُضيف المدير';
@@ -3030,8 +3030,8 @@ function showLogin(msg){
   let el = document.getElementById('login');
   if (!el) { el = document.createElement('div'); el.id = 'login'; el.setAttribute('dir','rtl'); document.body.appendChild(el); }
   el.innerHTML = `<form id="lform"><div style="display:flex;align-items:center;gap:10px"><img src="${LOGO}" alt="" width="46" height="47"><div><b style="font-family:var(--display);font-size:1.1rem">خيرات العز</b><div class="muted" style="font-size:.8rem">لوحة العرض للمدراء</div></div></div>
-    <div class="field"><label for="lu">اسم الدخول</label><input id="lu" name="u" dir="ltr" autocomplete="username" required></div>
-    <div class="field"><label for="lp">كلمة المرور</label><input id="lp" name="p" type="password" dir="ltr" autocomplete="current-password" required></div>
+    <div class="field"><label for="lu">اسم الدخول</label><input id="lu" name="u" dir="ltr" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required></div>
+    <div class="field"><label for="lp">كلمة المرور</label><input id="lp" name="p" type="password" dir="ltr" autocomplete="current-password" autocapitalize="off" required></div>
     <div class="err" id="lerr" ${msg?'':'hidden'}>${esc(msg||'')}</div><button class="btn" type="submit" id="lbtn">دخول</button></form>`;
   el.hidden = false;
   $('#lform').addEventListener('submit', async e => {
